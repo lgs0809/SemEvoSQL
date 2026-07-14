@@ -1,0 +1,1 @@
+ALTER TABLE datasource ALTER COLUMN password TYPE TEXT;
