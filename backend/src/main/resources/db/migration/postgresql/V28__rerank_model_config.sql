@@ -1,0 +1,4 @@
+ALTER TABLE model_config
+    ADD COLUMN IF NOT EXISTS rerank_path VARCHAR(255),
+    ADD COLUMN IF NOT EXISTS request_timeout_seconds INTEGER NOT NULL DEFAULT 60,
+    ALTER COLUMN api_key DROP NOT NULL;
