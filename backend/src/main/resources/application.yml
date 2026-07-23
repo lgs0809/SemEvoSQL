@@ -1,0 +1,223 @@
+server:
+  port: 8065
+  address: ${SEMEVOSQL_SERVER_ADDRESS:127.0.0.1}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when_authorized
+  health:
+    elasticsearch:
+      enabled: false
+  metrics:
+    tags:
+      application: semevosql
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+# Shared defaults are fail-closed. Local-only credentials and unsafe conveniences live in application-local.yml.
+semevosql:
+  # One semantic-planning operation shares this budget across its initial call and optional repair. The absolute
+  # interactive Run deadline is still authoritative and may only shorten it.
+  planner:
+    total-budget-ms: ${SEMEVOSQL_PLANNER_TOTAL_BUDGET_MS:120000}
+    max-model-calls: ${SEMEVOSQL_PLANNER_MAX_MODEL_CALLS:2}
+    minimum-repair-budget-ms: ${SEMEVOSQL_PLANNER_MINIMUM_REPAIR_BUDGET_MS:5000}
+  instance-id: ${HOSTNAME:local}
+  mcp:
+    enabled: ${SEMEVOSQL_MCP_ENABLED:true}
+    external:
+      public-base-url: ${SEMEVOSQL_MCP_PUBLIC_BASE_URL:http://localhost:8065}
+      endpoint-path: ${SEMEVOSQL_MCP_ENDPOINT:/mcp}
+      credential-ttl-days: ${SEMEVOSQL_MCP_CREDENTIAL_TTL_DAYS:90}
+      retry-window-seconds: ${SEMEVOSQL_MCP_RETRY_WINDOW_SECONDS:300}
+  runtime-role: ${SEMEVOSQL_RUNTIME_ROLE:application}
+  secrets:
+    encryption-key: ${SEMEVOSQL_SECRET_ENCRYPTION_KEY:}
+    migrate-plaintext: ${SEMEVOSQL_MIGRATE_PLAINTEXT_SECRETS:true}
+  operator:
+    default-operator: ${SEMEVOSQL_OPERATOR_DEFAULT_OPERATOR:local-operator}
+  model-client:
+    connection-max-retries: ${SEMEVOSQL_MODEL_CONNECTION_MAX_RETRIES:4}
+    connection-initial-backoff: ${SEMEVOSQL_MODEL_CONNECTION_INITIAL_BACKOFF:250ms}
+    connection-max-backoff: ${SEMEVOSQL_MODEL_CONNECTION_MAX_BACKOFF:2s}
+    connection-retry-jitter: ${SEMEVOSQL_MODEL_CONNECTION_RETRY_JITTER:0.2}
+    request-timeout: ${SEMEVOSQL_MODEL_REQUEST_TIMEOUT:60s}
+    validation-freshness: ${SEMEVOSQL_MODEL_VALIDATION_FRESHNESS:6h}
+  llm-service-type: stream
+  code-executor:
+    code-pool-executor: ${SEMEVOSQL_CODE_EXECUTOR:docker}
+    remote-url: ${SEMEVOSQL_EXECUTION_REMOTE_URL:}
+    internal-token: ${SEMEVOSQL_EXECUTION_INTERNAL_TOKEN:}
+    max-code-bytes: ${SEMEVOSQL_EXECUTION_MAX_CODE_BYTES:1048576}
+    max-input-bytes: ${SEMEVOSQL_EXECUTION_MAX_INPUT_BYTES:5242880}
+    max-requirement-bytes: ${SEMEVOSQL_EXECUTION_MAX_REQUIREMENT_BYTES:65536}
+    image-name: ${SEMEVOSQL_EXECUTION_IMAGE:semevosql/python-runner:1.0.0}
+    network-mode: ${SEMEVOSQL_EXECUTION_NETWORK_MODE:none}
+    limit-memory: ${SEMEVOSQL_EXECUTION_MEMORY_MB:500}
+    cpu-core: ${SEMEVOSQL_EXECUTION_CPU_CORES:1}
+    pids-limit: ${SEMEVOSQL_EXECUTION_PIDS_LIMIT:64}
+    run-as-user: ${SEMEVOSQL_EXECUTION_RUN_AS_USER:65534:65534}
+    read-only-root-filesystem: ${SEMEVOSQL_EXECUTION_READ_ONLY_ROOT:true}
+    tmpfs-size-mb: ${SEMEVOSQL_EXECUTION_TMPFS_SIZE_MB:128}
+    code-timeout: ${SEMEVOSQL_EXECUTION_CODE_TIMEOUT:60s}
+    python-max-tries-count: 5
+  file:
+    type: ${SEMEVOSQL_FILE_TYPE:local}
+    path-prefix: semevosql
+    path: ${SEMEVOSQL_FILE_PATH:uploads}
+    image-size: 2097152
+    oss:
+      access-key-id: ${SEMEVOSQL_OSS_ACCESS_KEY_ID:}
+      access-key-secret: ${SEMEVOSQL_OSS_ACCESS_KEY_SECRET:}
+      endpoint: ${SEMEVOSQL_OSS_ENDPOINT:}
+      bucket-name: ${SEMEVOSQL_OSS_BUCKET_NAME:}
+      custom-domain: ${SEMEVOSQL_OSS_CUSTOM_DOMAIN:}
+  max-sql-retry-count: 10
+  sql-execution:
+    max-rows: 1000
+    query-timeout-seconds: 30
+    max-sql-length: 100000
+    explain-enabled: true
+    preview-enabled: true
+    preview-rows: 50
+    preflight-timeout-seconds: 10
+    max-join-tables: 8
+    max-estimated-rows: 10000000
+    require-time-filter: true
+    max-time-range-days: 366
+    reject-full-table-scan: true
+  langfuse:
+    enabled: ${SEMEVOSQL_LANGFUSE_ENABLED:false}
+    host: ${SEMEVOSQL_LANGFUSE_HOST:}
+    public-key: ${SEMEVOSQL_LANGFUSE_PUBLIC_KEY:}
+    secret-key: ${SEMEVOSQL_LANGFUSE_SECRET_KEY:}
+  context:
+    recent-turn-count: ${SEMEVOSQL_CONTEXT_RECENT_TURNS:6}
+    compression-enabled: ${SEMEVOSQL_CONTEXT_COMPRESSION_ENABLED:true}
+    compression-trigger-ratio: ${SEMEVOSQL_CONTEXT_COMPRESSION_TRIGGER_RATIO:0.70}
+    minimum-compressible-turns: ${SEMEVOSQL_CONTEXT_MINIMUM_COMPRESSIBLE_TURNS:4}
+    compression-max-batch-turns: ${SEMEVOSQL_CONTEXT_COMPRESSION_MAX_BATCH_TURNS:20}
+    compressed-summary-max-chars: ${SEMEVOSQL_CONTEXT_COMPRESSED_SUMMARY_MAX_CHARS:300}
+    compressed-correction-max-count: ${SEMEVOSQL_CONTEXT_COMPRESSED_CORRECTION_MAX_COUNT:5}
+    compressed-question-max-count: ${SEMEVOSQL_CONTEXT_COMPRESSED_QUESTION_MAX_COUNT:3}
+    retrieval-candidate-count: ${SEMEVOSQL_CONTEXT_RETRIEVAL_CANDIDATES:50}
+    retrieved-turn-count: ${SEMEVOSQL_CONTEXT_RETRIEVED_TURNS:3}
+    min-relevance-score: ${SEMEVOSQL_CONTEXT_MIN_RELEVANCE:0.08}
+    explicit-reference-boost: ${SEMEVOSQL_CONTEXT_REFERENCE_BOOST:0.35}
+    query-enhance-max-tokens: ${SEMEVOSQL_CONTEXT_ENHANCE_MAX_TOKENS:3000}
+    feasibility-max-tokens: ${SEMEVOSQL_CONTEXT_FEASIBILITY_MAX_TOKENS:2200}
+    general-max-tokens: ${SEMEVOSQL_CONTEXT_GENERAL_MAX_TOKENS:3000}
+    max-result-preview-rows: ${SEMEVOSQL_CONTEXT_RESULT_PREVIEW_ROWS:3}
+    max-result-summary-tokens: ${SEMEVOSQL_CONTEXT_RESULT_MAX_TOKENS:600}
+    fallback-planner-max-tokens: ${SEMEVOSQL_CONTEXT_FALLBACK_PLAN_MAX_TOKENS:500}
+  run:
+    recovery-scan-ms: 10000
+    lease-renew-ms: 10000
+  retention:
+    enabled: ${SEMEVOSQL_RETENTION_ENABLED:false}
+    dry-run: ${SEMEVOSQL_RETENTION_DRY_RUN:true}
+    terminal-run-days: ${SEMEVOSQL_RETENTION_TERMINAL_RUN_DAYS:90}
+    batch-size: ${SEMEVOSQL_RETENTION_BATCH_SIZE:100}
+    batch-audit-days: ${SEMEVOSQL_RETENTION_BATCH_AUDIT_DAYS:365}
+    scan-delay-ms: ${SEMEVOSQL_RETENTION_SCAN_DELAY_MS:3600000}
+    lease-duration-seconds: ${SEMEVOSQL_RETENTION_LEASE_DURATION_SECONDS:600}
+  concurrency:
+    interactive-query:
+      max-concurrent: 20
+      queue-capacity: 100
+      queue-timeout-ms: 5000
+      # Execution budget per required answer goal. Freeze the unit at Run creation and allocate
+      # once after request analysis (1/2/3 goals => 300/600/900 seconds by default).
+      # Retries share the remaining budget; human confirmation has a separate durable 24-hour wait.
+      task-timeout-ms: ${SEMEVOSQL_INTERACTIVE_QUERY_DEADLINE_MS:300000}
+    initialization:
+      max-concurrent: 4
+      queue-capacity: 20
+      queue-timeout-ms: 10000
+      task-timeout-ms: 600000
+    evaluation:
+      max-concurrent: 2
+      queue-capacity: 20
+      queue-timeout-ms: 10000
+      task-timeout-ms: 600000
+    sql-execution:
+      max-concurrent: 30
+      queue-capacity: 100
+      queue-timeout-ms: 5000
+      task-timeout-ms: 120000
+    sql-limits:
+      global-max-concurrent: 30
+      default-per-datasource: 5
+      default-per-project: 10
+      default-per-user: 3
+      acquire-timeout-ms: 5000
+      failure-threshold: 5
+      circuit-open-ms: 30000
+
+spring:
+  datasource:
+    url: ${SEMEVOSQL_DATASOURCE_URL}
+    username: ${SEMEVOSQL_DATASOURCE_USERNAME}
+    password: ${SEMEVOSQL_DATASOURCE_PASSWORD:}
+    driver-class-name: ${SEMEVOSQL_DATASOURCE_DRIVER:org.postgresql.Driver}
+    type: com.alibaba.druid.pool.DruidDataSource
+    validation-query: SELECT 1
+    test-while-idle: true
+    test-on-borrow: false
+    test-on-return: false
+  flyway:
+    enabled: ${SEMEVOSQL_FLYWAY_ENABLED:true}
+    locations: classpath:db/migration/{vendor}
+    baseline-on-migrate: true
+    baseline-version: 1
+    validate-on-migrate: true
+    validate-migration-naming: true
+    clean-disabled: true
+    out-of-order: false
+    connect-retries: 10
+  ai:
+    mcp:
+      server:
+        enabled: ${SEMEVOSQL_MCP_ENABLED:true}
+        name: semevosql-project-data
+        version: 1.0.0
+        protocol: STREAMABLE
+        type: ASYNC
+        tool-callback-converter: false
+        annotation-scanner:
+          enabled: false
+        capabilities:
+          tool: true
+          resource: false
+          prompt: false
+          completion: false
+        streamable-http:
+          mcp-endpoint: ${SEMEVOSQL_MCP_ENDPOINT:/mcp}
+  codec:
+    max-in-memory-size: ${SEMEVOSQL_HTTP_MAX_IN_MEMORY_SIZE:12MB}
+  webflux:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+      enabled: true
+
+mybatis:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+
+logging:
+  level:
+    cn.lgs.semevosql: info
+    org.springframework.jdbc: info

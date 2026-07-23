@@ -1,0 +1,42 @@
+{
+  "formatVersion": "1.0",
+  "dialect": "mysql",
+  "tables": [
+    {
+      "datasource": "mall",
+      "schema": "shop",
+      "table": "t_order",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "integer",
+          "nativeType": "BIGINT",
+          "nullable": false
+        },
+        {
+          "name": "amt",
+          "dataType": "integer",
+          "nativeType": "BIGINT",
+          "nullable": false
+        },
+        {
+          "name": "pt",
+          "dataType": "datetime",
+          "nativeType": "DATETIME",
+          "nullable": true
+        },
+        {
+          "name": "st",
+          "dataType": "integer",
+          "nativeType": "INT",
+          "nullable": false
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "uniqueKeys": [],
+      "foreignKeys": []
+    }
+  ]
+}

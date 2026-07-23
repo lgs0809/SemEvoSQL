@@ -1,0 +1,151 @@
+{
+  "formatVersion": "1.0",
+  "sourceSchemaFingerprint": "sha256:162b99237cf44c5bc3b53b5fabee3495904286e58955453a410671fd0ea48161",
+  "catalog": {
+    "entities": [
+      {
+        "code": "order",
+        "name": "订单",
+        "description": "合成订单实体",
+        "grain": "每笔订单一条",
+        "primaryKey": [
+          "order_id"
+        ],
+        "source": {
+          "tables": [
+            {
+              "alias": "o",
+              "datasource": "mall",
+              "schema": "shop",
+              "table": "t_order"
+            }
+          ],
+          "base": "o",
+          "joins": []
+        },
+        "attributes": [
+          {
+            "code": "order_id",
+            "name": "订单编号",
+            "description": "订单编号（合成教学示例已确认）",
+            "mapping": {
+              "source": "o",
+              "column": "id"
+            },
+            "dataType": "integer"
+          },
+          {
+            "code": "paid_amount",
+            "name": "实付金额",
+            "description": "实付金额（合成教学示例已确认）",
+            "mapping": {
+              "source": "o",
+              "column": "amt"
+            },
+            "dataType": "integer",
+            "unit": "分"
+          },
+          {
+            "code": "paid_at",
+            "name": "支付时间",
+            "description": "支付时间（合成教学示例已确认）",
+            "mapping": {
+              "source": "o",
+              "column": "pt"
+            },
+            "dataType": "datetime"
+          },
+          {
+            "code": "status",
+            "name": "订单状态",
+            "description": "订单状态（合成教学示例已确认）",
+            "mapping": {
+              "source": "o",
+              "column": "st"
+            },
+            "dataType": "integer"
+          }
+        ],
+        "filters": []
+      }
+    ],
+    "metrics": [
+      {
+        "code": "payment_amount",
+        "name": "支付金额",
+        "description": "支付状态为1，按支付时间统计实付金额，分换算元",
+        "entity": "order",
+        "expression": {
+          "op": "divide",
+          "left": {
+            "op": "sum",
+            "arg": {
+              "attribute": "paid_amount"
+            }
+          },
+          "right": {
+            "literal": 100
+          },
+          "onZero": "null"
+        },
+        "filters": [
+          {
+            "attribute": "status",
+            "operator": "eq",
+            "value": 1
+          }
+        ],
+        "timeAttribute": "paid_at",
+        "unit": "元"
+      }
+    ],
+    "dimensions": [],
+    "relationships": [],
+    "rules": []
+  },
+  "evidence": [
+    {
+      "target": "entity:order",
+      "kind": "document",
+      "source": "synthetic-business-notes.md",
+      "location": "合成订单定义",
+      "statement": "仅用于测试的合成事实；见配套说明，不代表真实项目或用户确认"
+    },
+    {
+      "target": "entity:order/attribute:order_id",
+      "kind": "document",
+      "source": "synthetic-business-notes.md",
+      "location": "合成订单定义",
+      "statement": "仅用于测试的合成事实；见配套说明，不代表真实项目或用户确认"
+    },
+    {
+      "target": "entity:order/attribute:paid_amount",
+      "kind": "document",
+      "source": "synthetic-business-notes.md",
+      "location": "合成订单定义",
+      "statement": "仅用于测试的合成事实；见配套说明，不代表真实项目或用户确认"
+    },
+    {
+      "target": "entity:order/attribute:paid_at",
+      "kind": "document",
+      "source": "synthetic-business-notes.md",
+      "location": "合成订单定义",
+      "statement": "仅用于测试的合成事实；见配套说明，不代表真实项目或用户确认"
+    },
+    {
+      "target": "entity:order/attribute:status",
+      "kind": "document",
+      "source": "synthetic-business-notes.md",
+      "location": "合成订单定义",
+      "statement": "仅用于测试的合成事实；见配套说明，不代表真实项目或用户确认"
+    },
+    {
+      "target": "metric:payment_amount",
+      "kind": "document",
+      "source": "synthetic-business-notes.md",
+      "location": "合成订单定义",
+      "statement": "仅用于测试的合成事实；见配套说明，不代表真实项目或用户确认"
+    }
+  ],
+  "unresolvedIssues": []
+}

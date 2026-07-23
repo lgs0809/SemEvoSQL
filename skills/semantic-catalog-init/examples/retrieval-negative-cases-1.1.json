@@ -1,0 +1,251 @@
+[
+  {
+    "name": "old_protocol_rejects_new_fields",
+    "path": "/formatVersion",
+    "value": "1.0"
+  },
+  {
+    "name": "blank_hint",
+    "path": "/catalog/metrics/0/retrieval/queryExpressions",
+    "value": [
+      "　 "
+    ]
+  },
+  {
+    "name": "control_hint",
+    "path": "/catalog/metrics/0/retrieval/queryContexts",
+    "value": [
+      "非法\n换行"
+    ]
+  },
+  {
+    "name": "duplicate_hint",
+    "path": "/catalog/metrics/0/retrieval/queryExpressions",
+    "value": [
+      "重复",
+      "重复"
+    ]
+  },
+  {
+    "name": "hint_count",
+    "path": "/catalog/metrics/0/retrieval/queryExpressions",
+    "value": [
+      "0",
+      "1",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6",
+      "7",
+      "8",
+      "9",
+      "10",
+      "11",
+      "12",
+      "13",
+      "14",
+      "15",
+      "16"
+    ]
+  },
+  {
+    "name": "hint_length",
+    "path": "/catalog/metrics/0/retrieval/queryContexts",
+    "value": [
+      "长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长"
+    ]
+  },
+  {
+    "name": "missing_context",
+    "path": "/catalog/metrics/0/retrieval",
+    "value": {
+      "queryExpressions": []
+    }
+  },
+  {
+    "name": "unknown_hint_property",
+    "path": "/catalog/metrics/0/retrieval",
+    "value": {
+      "queryExpressions": [],
+      "queryContexts": [],
+      "formula": "anything"
+    }
+  },
+  {
+    "name": "reversed_range",
+    "path": "/catalog/metrics/0/valueRange",
+    "value": {
+      "minimum": 101,
+      "maximum": 100
+    }
+  },
+  {
+    "name": "empty_open_range",
+    "path": "/catalog/metrics/0/valueRange",
+    "value": {
+      "minimum": 0,
+      "maximum": 0,
+      "minimumInclusive": false
+    }
+  },
+  {
+    "name": "inclusive_without_bound",
+    "path": "/catalog/metrics/0/valueRange",
+    "value": {
+      "minimum": 0,
+      "maximumInclusive": true
+    }
+  },
+  {
+    "name": "unknown_range_property",
+    "path": "/catalog/metrics/0/valueRange",
+    "value": {
+      "minimum": 0,
+      "unit": "%"
+    }
+  },
+  {
+    "name": "unbounded_constraint",
+    "path": "/catalog/metrics/0/valueRange",
+    "value": {}
+  },
+  {
+    "name": "wrong_asset",
+    "path": "/catalog",
+    "value": {
+      "entities": [
+        {
+          "code": "order",
+          "name": "订单",
+          "description": "合成订单实体",
+          "grain": "每笔订单一条",
+          "primaryKey": [
+            "order_id"
+          ],
+          "source": {
+            "tables": [
+              {
+                "alias": "o",
+                "datasource": "mall",
+                "schema": "shop",
+                "table": "t_order"
+              }
+            ],
+            "base": "o",
+            "joins": []
+          },
+          "attributes": [
+            {
+              "code": "order_id",
+              "name": "订单编号",
+              "description": "订单编号（合成教学示例已确认）",
+              "mapping": {
+                "source": "o",
+                "column": "id"
+              },
+              "dataType": "integer"
+            },
+            {
+              "code": "paid_amount",
+              "name": "实付金额",
+              "description": "实付金额（合成教学示例已确认）",
+              "mapping": {
+                "source": "o",
+                "column": "amt"
+              },
+              "dataType": "integer",
+              "unit": "分",
+              "retrieval": {
+                "queryExpressions": [
+                  "实际支付金额"
+                ],
+                "queryContexts": [
+                  "以分存储金额"
+                ]
+              }
+            },
+            {
+              "code": "paid_at",
+              "name": "支付时间",
+              "description": "支付时间（合成教学示例已确认）",
+              "mapping": {
+                "source": "o",
+                "column": "pt"
+              },
+              "dataType": "datetime"
+            },
+            {
+              "code": "status",
+              "name": "订单状态",
+              "description": "订单状态（合成教学示例已确认）",
+              "mapping": {
+                "source": "o",
+                "column": "st"
+              },
+              "dataType": "integer"
+            }
+          ],
+          "filters": [],
+          "retrieval": {
+            "queryExpressions": [
+              "最近付款的订单有哪些"
+            ],
+            "queryContexts": [
+              "订单业务分析"
+            ]
+          }
+        }
+      ],
+      "metrics": [
+        {
+          "code": "payment_amount",
+          "name": "支付金额",
+          "description": "支付状态为1，按支付时间统计实付金额，分换算元",
+          "entity": "order",
+          "expression": {
+            "op": "divide",
+            "left": {
+              "op": "sum",
+              "arg": {
+                "attribute": "paid_amount"
+              }
+            },
+            "right": {
+              "literal": 100
+            },
+            "onZero": "null"
+          },
+          "filters": [
+            {
+              "attribute": "status",
+              "operator": "eq",
+              "value": 1
+            }
+          ],
+          "timeAttribute": "paid_at",
+          "unit": "元",
+          "retrieval": {
+            "queryExpressions": [
+              "实际收到多少钱"
+            ],
+            "queryContexts": [
+              "统计已支付订单，以元显示"
+            ]
+          },
+          "valueRange": {
+            "minimum": 0,
+            "minimumInclusive": true
+          }
+        }
+      ],
+      "dimensions": [],
+      "relationships": [],
+      "rules": [],
+      "retrieval": {
+        "queryExpressions": [],
+        "queryContexts": []
+      }
+    }
+  }
+]

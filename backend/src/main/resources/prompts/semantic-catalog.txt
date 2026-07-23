@@ -1,0 +1,15 @@
+### SemEvoSQL 已发布语义目录
+以下内容来自当前 Project Version 已发布的受治理 Semantic Catalog，是高级执行路径的权威语义上下文。
+
+目录可能包含：
+- Model：业务对象与物理表绑定
+- Metric：指标口径、聚合方式、时间列与过滤规则
+- Dimension：维度字段及允许的查询能力
+- Relationship：模型之间受治理的关联关系
+- Grain：结果粒度约束
+- Business Rule：已确认的业务规则
+
+生成或修复查询时只能使用目录中明确存在且已启用的资产；不得根据名称猜测不存在的指标、维度、关系或业务口径。
+
+#### 当前已发布语义目录
+{semanticModel}

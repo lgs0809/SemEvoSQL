@@ -1,0 +1,27 @@
+spring:
+  config:
+    activate:
+      on-profile: local
+  datasource:
+    url: ${SEMEVOSQL_DATASOURCE_URL:jdbc:postgresql://127.0.0.1:5432/semevosql?stringtype=unspecified}
+    username: ${SEMEVOSQL_DATASOURCE_USERNAME:semevosql}
+    password: ${SEMEVOSQL_DATASOURCE_PASSWORD:}
+    driver-class-name: ${SEMEVOSQL_DATASOURCE_DRIVER:org.postgresql.Driver}
+
+semevosql:
+  code-executor:
+    code-pool-executor: ${SEMEVOSQL_CODE_EXECUTOR:local}
+  file:
+    type: local
+  sql-execution:
+    require-time-filter: false
+    reject-full-table-scan: false
+  operator:
+    default-operator: ${SEMEVOSQL_OPERATOR_DEFAULT_OPERATOR:local-operator}
+
+logging:
+  level:
+    cn.lgs.semevosql.service: debug
+    cn.lgs.semevosql.workflow.node: debug
+    com.alibaba.cloud.ai.mapper: debug
+    org.springframework.jdbc: debug

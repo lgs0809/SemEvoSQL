@@ -1,0 +1,25 @@
+spring:
+  config:
+    activate:
+      on-profile: prod
+
+semevosql:
+  code-executor:
+    code-pool-executor: ${SEMEVOSQL_CODE_EXECUTOR:docker}
+  sql-execution:
+    require-time-filter: true
+    reject-full-table-scan: true
+  mcp:
+    enabled: ${SEMEVOSQL_MCP_ENABLED:true}
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
+logging:
+  level:
+    root: info
+    cn.lgs.semevosql: info
+    org.springframework.jdbc: warn

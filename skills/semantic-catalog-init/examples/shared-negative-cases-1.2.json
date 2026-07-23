@@ -1,0 +1,608 @@
+[
+  {
+    "name": "unknown-definition",
+    "path": "/catalog/bindings/0/definition",
+    "value": "ghost"
+  },
+  {
+    "name": "unknown-revision",
+    "path": "/catalog/bindings/0/definitionRevision",
+    "value": 2
+  },
+  {
+    "name": "unknown-model",
+    "path": "/catalog/bindings/0/model",
+    "value": "ghost"
+  },
+  {
+    "name": "unknown-attribute",
+    "path": "/catalog/bindings/0/attributeMappings/amount",
+    "value": "ghost"
+  },
+  {
+    "name": "parameter-type",
+    "path": "/catalog/bindings/0/attributeMappings/amount",
+    "value": "paid_at"
+  },
+  {
+    "name": "parameter-set",
+    "path": "/catalog/bindings/0/attributeMappings",
+    "value": {
+      "amount": "paid_amount"
+    }
+  },
+  {
+    "name": "grain-mismatch",
+    "path": "/catalog/definitions/0/specification/grainKeys",
+    "value": [
+      "state"
+    ]
+  },
+  {
+    "name": "formula-unknown-parameter",
+    "path": "/catalog/definitions/0/specification/expression",
+    "value": {
+      "op": "sum",
+      "arg": {
+        "attribute": "ghost"
+      }
+    }
+  },
+  {
+    "name": "unit-type",
+    "path": "/catalog/definitions/0/specification/unit",
+    "value": 100
+  },
+  {
+    "name": "metric-dictionary",
+    "path": "/catalog/bindings/0/dictionary",
+    "value": {
+      "code": "payment_state",
+      "revision": 1,
+      "valueMappings": [
+        {
+          "source": 1,
+          "target": "paid"
+        },
+        {
+          "source": 9,
+          "target": "cancelled"
+        }
+      ]
+    }
+  },
+  {
+    "name": "dictionary-revision",
+    "path": "/catalog/bindings/1/dictionary/revision",
+    "value": 2
+  },
+  {
+    "name": "dictionary-code",
+    "path": "/catalog/bindings/1/dictionary/valueMappings/0/target",
+    "value": "ghost"
+  },
+  {
+    "name": "dictionary-source-type",
+    "path": "/catalog/bindings/1/dictionary/valueMappings/0/source",
+    "value": "1"
+  },
+  {
+    "name": "duplicate-dictionary-source",
+    "path": "/catalog/bindings/1/dictionary/valueMappings",
+    "value": [
+      {
+        "source": 1,
+        "target": "paid"
+      },
+      {
+        "source": 1,
+        "target": "cancelled"
+      }
+    ]
+  },
+  {
+    "name": "duplicate-dictionary-code",
+    "path": "/catalog/enumDictionaries/0/entries",
+    "value": [
+      {
+        "value": "paid",
+        "label": "已支付",
+        "aliases": [
+          "已付款"
+        ]
+      },
+      {
+        "value": "paid",
+        "label": "已支付",
+        "aliases": [
+          "已付款"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "duplicate-model-binding",
+    "path": "/catalog/bindings",
+    "value": [
+      {
+        "model": "order",
+        "code": "payment",
+        "definition": "payment_amount",
+        "definitionRevision": 1,
+        "roleName": "订单支付金额",
+        "aliases": [
+          "订单到账金额"
+        ],
+        "attributeMappings": {
+          "identity": "order_id",
+          "amount": "paid_amount",
+          "time": "paid_at",
+          "state": "status"
+        }
+      },
+      {
+        "model": "order",
+        "code": "state",
+        "definition": "state_concept",
+        "definitionRevision": 1,
+        "roleName": "订单付款状态",
+        "aliases": [],
+        "attributeMappings": {
+          "state": "status"
+        },
+        "dictionary": {
+          "code": "payment_state",
+          "revision": 1,
+          "valueMappings": [
+            {
+              "source": 1,
+              "target": "paid"
+            },
+            {
+              "source": 9,
+              "target": "cancelled"
+            }
+          ]
+        }
+      },
+      {
+        "model": "order",
+        "code": "amount",
+        "definition": "minor_amount",
+        "definitionRevision": 1,
+        "roleName": "订单实付分值",
+        "aliases": [],
+        "attributeMappings": {
+          "amount": "paid_amount"
+        }
+      },
+      {
+        "model": "paid_order",
+        "code": "payment",
+        "definition": "payment_amount",
+        "definitionRevision": 1,
+        "roleName": "已支付订单金额",
+        "aliases": [
+          "已付订单到账金额"
+        ],
+        "attributeMappings": {
+          "identity": "payment_key",
+          "amount": "amount_fen",
+          "time": "settled_on",
+          "state": "payment_state"
+        }
+      },
+      {
+        "model": "paid_order",
+        "code": "state",
+        "definition": "state_concept",
+        "definitionRevision": 1,
+        "roleName": "支付记录付款状态",
+        "aliases": [],
+        "attributeMappings": {
+          "state": "payment_state"
+        },
+        "dictionary": {
+          "code": "payment_state",
+          "revision": 1,
+          "valueMappings": [
+            {
+              "source": 1,
+              "target": "paid"
+            },
+            {
+              "source": 9,
+              "target": "cancelled"
+            }
+          ]
+        }
+      },
+      {
+        "model": "paid_order",
+        "code": "amount",
+        "definition": "minor_amount",
+        "definitionRevision": 1,
+        "roleName": "支付实付分值",
+        "aliases": [],
+        "attributeMappings": {
+          "amount": "amount_fen"
+        }
+      },
+      {
+        "model": "order",
+        "code": "payment",
+        "definition": "payment_amount",
+        "definitionRevision": 1,
+        "roleName": "订单支付金额",
+        "aliases": [
+          "订单到账金额"
+        ],
+        "attributeMappings": {
+          "identity": "order_id",
+          "amount": "paid_amount",
+          "time": "paid_at",
+          "state": "status"
+        }
+      }
+    ]
+  },
+  {
+    "name": "duplicate-revision",
+    "path": "/catalog/definitions",
+    "value": [
+      {
+        "code": "payment_amount",
+        "revision": 1,
+        "type": "METRIC",
+        "name": "支付金额",
+        "description": "支付状态为1，按支付时间统计实付金额，分换算元",
+        "aliases": [
+          "实收金额"
+        ],
+        "retrieval": {
+          "queryExpressions": [
+            "实际收到多少钱"
+          ],
+          "queryContexts": [
+            "统计已支付订单，以元显示"
+          ]
+        },
+        "specification": {
+          "expression": {
+            "op": "divide",
+            "left": {
+              "op": "sum",
+              "arg": {
+                "attribute": "amount"
+              }
+            },
+            "right": {
+              "literal": 100
+            },
+            "onZero": "null"
+          },
+          "filters": [
+            {
+              "attribute": "state",
+              "operator": "eq",
+              "value": 1
+            }
+          ],
+          "timeAttribute": "time",
+          "unit": "元",
+          "valueRange": {
+            "minimum": 0,
+            "minimumInclusive": true
+          },
+          "parameters": [
+            {
+              "code": "identity",
+              "dataType": "integer"
+            },
+            {
+              "code": "amount",
+              "dataType": "integer"
+            },
+            {
+              "code": "time",
+              "dataType": "datetime"
+            },
+            {
+              "code": "state",
+              "dataType": "integer"
+            }
+          ],
+          "grainKeys": [
+            "identity"
+          ]
+        }
+      },
+      {
+        "code": "state_concept",
+        "revision": 1,
+        "type": "DIMENSION",
+        "name": "付款状态",
+        "description": "状态编码角色由模型绑定明确，不意味着两个模型可连接",
+        "aliases": [
+          "结算状态"
+        ],
+        "specification": {
+          "parameters": [
+            {
+              "code": "state",
+              "dataType": "integer"
+            }
+          ],
+          "attribute": "state"
+        }
+      },
+      {
+        "code": "minor_amount",
+        "revision": 1,
+        "type": "ATTRIBUTE",
+        "name": "实付金额",
+        "description": "实付金额按整数分存储",
+        "aliases": [
+          "实付分值"
+        ],
+        "specification": {
+          "parameters": [
+            {
+              "code": "amount",
+              "dataType": "integer"
+            }
+          ],
+          "attribute": "amount",
+          "unit": "分"
+        }
+      },
+      {
+        "code": "payment_amount",
+        "revision": 1,
+        "type": "METRIC",
+        "name": "支付金额",
+        "description": "支付状态为1，按支付时间统计实付金额，分换算元",
+        "aliases": [
+          "实收金额"
+        ],
+        "retrieval": {
+          "queryExpressions": [
+            "实际收到多少钱"
+          ],
+          "queryContexts": [
+            "统计已支付订单，以元显示"
+          ]
+        },
+        "specification": {
+          "expression": {
+            "op": "divide",
+            "left": {
+              "op": "sum",
+              "arg": {
+                "attribute": "amount"
+              }
+            },
+            "right": {
+              "literal": 100
+            },
+            "onZero": "null"
+          },
+          "filters": [
+            {
+              "attribute": "state",
+              "operator": "eq",
+              "value": 1
+            }
+          ],
+          "timeAttribute": "time",
+          "unit": "元",
+          "valueRange": {
+            "minimum": 0,
+            "minimumInclusive": true
+          },
+          "parameters": [
+            {
+              "code": "identity",
+              "dataType": "integer"
+            },
+            {
+              "code": "amount",
+              "dataType": "integer"
+            },
+            {
+              "code": "time",
+              "dataType": "datetime"
+            },
+            {
+              "code": "state",
+              "dataType": "integer"
+            }
+          ],
+          "grainKeys": [
+            "identity"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "name": "missing-binding-evidence",
+    "path": "/evidence",
+    "value": [
+      {
+        "target": "entity:order",
+        "kind": "document",
+        "source": "synthetic-business-notes.md",
+        "location": "合成订单定义",
+        "statement": "仅用于测试的合成事实；见配套说明，不代表真实项目或用户确认"
+      },
+      {
+        "target": "entity:order/attribute:order_id",
+        "kind": "document",
+        "source": "synthetic-business-notes.md",
+        "location": "合成订单定义",
+        "statement": "仅用于测试的合成事实；见配套说明，不代表真实项目或用户确认"
+      },
+      {
+        "target": "entity:order/attribute:paid_amount",
+        "kind": "document",
+        "source": "synthetic-business-notes.md",
+        "location": "合成订单定义",
+        "statement": "仅用于测试的合成事实；见配套说明，不代表真实项目或用户确认"
+      },
+      {
+        "target": "entity:order/attribute:paid_at",
+        "kind": "document",
+        "source": "synthetic-business-notes.md",
+        "location": "合成订单定义",
+        "statement": "仅用于测试的合成事实；见配套说明，不代表真实项目或用户确认"
+      },
+      {
+        "target": "entity:order/attribute:status",
+        "kind": "document",
+        "source": "synthetic-business-notes.md",
+        "location": "合成订单定义",
+        "statement": "仅用于测试的合成事实；见配套说明，不代表真实项目或用户确认"
+      },
+      {
+        "target": "entity:paid_order",
+        "kind": "document",
+        "source": "synthetic-business-notes.md",
+        "location": "合成订单定义",
+        "statement": "仅用于测试的合成事实；见配套说明，不代表真实项目或用户确认"
+      },
+      {
+        "target": "entity:paid_order/attribute:payment_key",
+        "kind": "document",
+        "source": "synthetic-business-notes.md",
+        "location": "合成订单定义",
+        "statement": "仅用于测试的合成事实；见配套说明，不代表真实项目或用户确认"
+      },
+      {
+        "target": "entity:paid_order/attribute:amount_fen",
+        "kind": "document",
+        "source": "synthetic-business-notes.md",
+        "location": "合成订单定义",
+        "statement": "仅用于测试的合成事实；见配套说明，不代表真实项目或用户确认"
+      },
+      {
+        "target": "entity:paid_order/attribute:settled_on",
+        "kind": "document",
+        "source": "synthetic-business-notes.md",
+        "location": "合成订单定义",
+        "statement": "仅用于测试的合成事实；见配套说明，不代表真实项目或用户确认"
+      },
+      {
+        "target": "entity:paid_order/attribute:payment_state",
+        "kind": "document",
+        "source": "synthetic-business-notes.md",
+        "location": "合成订单定义",
+        "statement": "仅用于测试的合成事实；见配套说明，不代表真实项目或用户确认"
+      },
+      {
+        "target": "definition:payment_amount@1",
+        "kind": "document",
+        "source": "synthetic-business-notes.md",
+        "location": "共享定义及模型角色合成验收",
+        "statement": "仅用于程序验证的合成定义及明确角色，不代表真实业务或用户确认"
+      },
+      {
+        "target": "definition:state_concept@1",
+        "kind": "document",
+        "source": "synthetic-business-notes.md",
+        "location": "共享定义及模型角色合成验收",
+        "statement": "仅用于程序验证的合成定义及明确角色，不代表真实业务或用户确认"
+      },
+      {
+        "target": "definition:minor_amount@1",
+        "kind": "document",
+        "source": "synthetic-business-notes.md",
+        "location": "共享定义及模型角色合成验收",
+        "statement": "仅用于程序验证的合成定义及明确角色，不代表真实业务或用户确认"
+      },
+      {
+        "target": "dictionary:payment_state@1",
+        "kind": "document",
+        "source": "synthetic-business-notes.md",
+        "location": "共享定义及模型角色合成验收",
+        "statement": "仅用于程序验证的合成定义及明确角色，不代表真实业务或用户确认"
+      },
+      {
+        "target": "binding:order/state",
+        "kind": "document",
+        "source": "synthetic-business-notes.md",
+        "location": "共享定义及模型角色合成验收",
+        "statement": "仅用于程序验证的合成定义及明确角色，不代表真实业务或用户确认"
+      },
+      {
+        "target": "binding:order/amount",
+        "kind": "document",
+        "source": "synthetic-business-notes.md",
+        "location": "共享定义及模型角色合成验收",
+        "statement": "仅用于程序验证的合成定义及明确角色，不代表真实业务或用户确认"
+      },
+      {
+        "target": "binding:paid_order/payment",
+        "kind": "document",
+        "source": "synthetic-business-notes.md",
+        "location": "共享定义及模型角色合成验收",
+        "statement": "仅用于程序验证的合成定义及明确角色，不代表真实业务或用户确认"
+      },
+      {
+        "target": "binding:paid_order/state",
+        "kind": "document",
+        "source": "synthetic-business-notes.md",
+        "location": "共享定义及模型角色合成验收",
+        "statement": "仅用于程序验证的合成定义及明确角色，不代表真实业务或用户确认"
+      },
+      {
+        "target": "binding:paid_order/amount",
+        "kind": "document",
+        "source": "synthetic-business-notes.md",
+        "location": "共享定义及模型角色合成验收",
+        "statement": "仅用于程序验证的合成定义及明确角色，不代表真实业务或用户确认"
+      }
+    ]
+  },
+  {
+    "name": "blocking-shared",
+    "path": "/unresolvedIssues",
+    "value": [
+      {
+        "target": "definition:payment_amount@1",
+        "question": "未经确认",
+        "blocking": true
+      }
+    ]
+  },
+  {
+    "name": "no-silent-enum-conflict",
+    "path": "/catalog/entities/0/attributes/3/enumValues",
+    "value": [
+      {
+        "value": 1,
+        "label": "已取消"
+      }
+    ]
+  },
+  {
+    "name": "unknown-extra-binding",
+    "path": "/catalog/bindings/0/join",
+    "value": "order.id=paid_order.id"
+  },
+  {
+    "name": "duplicate-alias",
+    "path": "/catalog/definitions/0/aliases",
+    "value": [
+      "实收金额",
+      "实收金额"
+    ]
+  },
+  {
+    "name": "hint-is-not-alias",
+    "path": "/catalog/definitions/0/aliases",
+    "value": [
+      "\t"
+    ]
+  }
+]
