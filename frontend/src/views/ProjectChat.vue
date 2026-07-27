@@ -1,0 +1,2855 @@
+<!--
+ * Copyright 2024-2026 the original author or authors.
+ * Licensed under the Apache License, Version 2.0.
+ -->
+<template>
+  <BaseLayout focus>
+    <div class="chat-shell">
+      <aside class="conversation-sidebar">
+        <div class="sidebar-title">
+          <div>
+            <span class="sidebar-kicker">SemEvoSQL</span>
+            <strong>查询会话</strong>
+          </div>
+          <el-button
+            circle
+            :icon="Plus"
+            :disabled="!canCreateConversation"
+            title="新建查询会话"
+            aria-label="新建查询会话"
+            @click="createConversation"
+          />
+        </div>
+        <el-select
+          v-model="selectedProjectId"
+          filterable
+          placeholder="选择项目"
+          aria-label="选择查询项目"
+          @change="selectProject"
+        >
+          <el-option
+            v-for="item in projects"
+            :key="item.id"
+            :label="item.name"
+            :value="item.id"
+          />
+        </el-select>
+        <div class="conversation-tools">
+          <el-input
+            v-model="conversationSearch"
+            clearable
+            :prefix-icon="Search"
+            placeholder="搜索历史查询"
+          />
+          <div class="conversation-count">
+            <span>{{ conversationCountLabel }}</span>
+            <el-button
+              v-if="hasMoreConversations || showAllConversations"
+              link
+              size="small"
+              @click="showAllConversations = !showAllConversations"
+            >
+              {{ showAllConversations ? "收起历史" : "显示全部历史" }}
+            </el-button>
+          </div>
+        </div>
+        <div class="conversation-list" v-loading="conversationLoading">
+          <button
+            v-for="item in visibleConversations"
+            :key="item.conversationId"
+            class="conversation"
+            :class="{ active: item.conversationId === activeConversationId }"
+            :aria-current="
+              item.conversationId === activeConversationId ? 'true' : undefined
+            "
+            :title="item.title"
+            @click="selectConversation(item.conversationId)"
+          >
+            <strong>{{ item.title }}</strong>
+            <span>{{ formatTime(item.updateTime) }}</span>
+          </button>
+          <el-empty
+            v-if="!visibleConversations.length"
+            :image-size="72"
+            :description="conversationEmptyLabel"
+          />
+        </div>
+      </aside>
+
+      <main class="chat-main">
+        <div class="mobile-context-bar">
+          <el-select
+            v-model="selectedProjectId"
+            filterable
+            placeholder="选择项目"
+            aria-label="选择查询项目"
+            @change="selectProject"
+          >
+            <el-option
+              v-for="item in projects"
+              :key="item.id"
+              :label="item.name"
+              :value="item.id"
+            />
+          </el-select>
+          <el-select
+            v-model="activeConversationId"
+            placeholder="选择会话"
+            :disabled="!conversations.length"
+            @change="handleMobileConversationChange"
+          >
+            <el-option
+              v-for="item in conversations"
+              :key="item.conversationId"
+              :label="item.title"
+              :value="item.conversationId"
+            />
+          </el-select>
+          <el-button
+            circle
+            :icon="Plus"
+            :disabled="!canCreateConversation"
+            title="新建查询会话"
+            aria-label="新建查询会话"
+            @click="createConversation"
+          />
+        </div>
+
+        <header class="chat-header">
+          <button
+            class="focus-brand"
+            type="button"
+            aria-label="返回项目工作台"
+            @click="router.push('/projects')"
+          >
+            <span class="focus-brand-mark"><i class="bi bi-stars"></i></span>
+            <span>SemEvoSQL</span>
+          </button>
+          <div class="chat-context">
+            <h1>
+              {{
+                selectedProject?.project.name ||
+                (conversationLoading ? "正在读取项目…" : "选择项目开始查询")
+              }}
+            </h1>
+            <span v-if="activeConversation" :title="activeConversation.title">
+              业务模型 v{{ conversationVersion?.versionNumber || "-" }} ·
+              {{ activeConversation.title }}
+            </span>
+            <span v-else-if="activeVersion"
+              >当前业务模型 v{{ activeVersion.versionNumber }}</span
+            >
+            <span v-else-if="selectedProject"
+              >项目尚未发布可用于查询的业务模型</span
+            >
+          </div>
+          <div class="run-actions">
+            <el-button
+              v-if="selectedProjectId"
+              text
+              @click="router.push(`/projects/${selectedProjectId}`)"
+              >项目概览</el-button
+            >
+            <el-tag
+              v-if="selectedProjectHealth"
+              :type="selectedProjectHealth.queryReady ? 'success' : 'warning'"
+              effect="plain"
+            >
+              {{
+                selectedProjectHealth.queryReady
+                  ? "查询入口已就绪"
+                  : "业务模型待发布"
+              }}
+            </el-tag>
+            <el-button v-if="activeRun && canResume" @click="resumeRun"
+              >继续执行</el-button
+            >
+            <el-button
+              v-if="activeRun && !terminalRun"
+              type="danger"
+              plain
+              @click="cancelRun"
+            >
+              {{ semanticUpdateRequest ? "取消口径修改" : "取消查询" }}
+            </el-button>
+          </div>
+        </header>
+
+        <el-alert
+          v-if="resumeWindowExpired"
+          type="warning"
+          :closable="false"
+          title="本次查询已超过可继续执行的时限，请重新发起查询。原记录已保留。"
+        />
+
+        <el-alert
+          v-if="initializationError"
+          class="page-error-alert"
+          type="error"
+          show-icon
+          :closable="false"
+          title="查询工作台初始化失败"
+        >
+          <template #default>
+            <div class="inline-recovery">
+              <span>{{ initializationError }}</span>
+              <el-button
+                size="small"
+                type="primary"
+                plain
+                @click="initializePage"
+              >
+                重新加载
+              </el-button>
+            </div>
+          </template>
+        </el-alert>
+
+        <el-alert
+          v-else-if="projectContextError"
+          class="page-error-alert"
+          type="warning"
+          show-icon
+          :closable="false"
+          title="当前项目上下文加载不完整"
+        >
+          <template #default>
+            <div class="inline-recovery">
+              <span>{{ projectContextError }}</span>
+              <el-button size="small" @click="loadProject()"
+                >重新加载项目</el-button
+              >
+            </div>
+          </template>
+        </el-alert>
+
+        <el-alert
+          v-else-if="selectedProject && selectedProjectHealthError"
+          class="page-error-alert"
+          type="info"
+          show-icon
+          :closable="false"
+          title="项目健康状态暂时不可用"
+        >
+          <template #default>
+            <div class="inline-recovery">
+              <span
+                >{{
+                  selectedProjectHealthError
+                }}。已有正式版本和历史会话仍可继续使用。</span
+              >
+              <el-button size="small" @click="reloadSelectedProjectHealth"
+                >重试状态</el-button
+              >
+            </div>
+          </template>
+        </el-alert>
+
+        <el-alert
+          v-if="
+            !queryCapabilityReady &&
+            (platformReadiness || platformReadinessError)
+          "
+          class="page-error-alert"
+          type="warning"
+          show-icon
+          :closable="false"
+          title="暂时无法创建新查询"
+        >
+          <template #default>
+            <span>
+              {{
+                platformReadinessError
+                  ? "模型能力状态暂时无法确认。历史会话和已有结果仍可查看。"
+                  : "模型服务当前不可用。历史会话和已有结果仍可查看。"
+              }}
+            </span>
+          </template>
+        </el-alert>
+
+        <el-alert
+          v-if="conversationUsesOlderVersion && !versionNoticeDismissed"
+          class="version-notice"
+          type="warning"
+          show-icon
+          :closable="false"
+        >
+          <template #title>
+            这个会话使用业务模型 v{{
+              conversationVersion?.versionNumber
+            }}。项目当前已经升级到 v{{ activeVersion?.versionNumber }}。
+          </template>
+          <div class="version-actions">
+            <el-button size="small" @click="versionNoticeDismissed = true">
+              继续查看旧会话
+            </el-button>
+            <el-button size="small" type="primary" @click="createConversation">
+              基于新版本开始新会话
+            </el-button>
+          </div>
+        </el-alert>
+
+        <QueryRunProgress
+          v-if="activeRun"
+          :run="activeRun"
+          :events="runEvents"
+          :needs-action="Boolean(clarification || humanReviewRequired)"
+          :transport-notice="showTransportNotice ? transportNotice : ''"
+          @confirm="scrollToBottom"
+        />
+
+        <section
+          ref="messageArea"
+          class="message-area"
+          v-loading="messageLoading"
+          @scroll="updateScrollPosition"
+        >
+          <el-alert
+            v-if="conversationError"
+            class="conversation-error-alert"
+            type="warning"
+            show-icon
+            :closable="false"
+            title="当前会话加载失败"
+          >
+            <template #default>
+              <div class="inline-recovery">
+                <span>{{ conversationError }}</span>
+                <el-button
+                  v-if="activeConversationId"
+                  size="small"
+                  @click="selectConversation(activeConversationId)"
+                >
+                  重新加载会话
+                </el-button>
+              </div>
+            </template>
+          </el-alert>
+
+          <section v-if="!selectedProjectId" class="project-selection-empty">
+            <div class="selection-icon"><i class="bi bi-folder2-open"></i></div>
+            <span class="selection-kicker">开始查询</span>
+            <h2>先选择项目，再开始查询</h2>
+            <p>
+              每次查询都会绑定到所选项目的业务模型、数据连接和语义规则，不会跨项目混用口径。
+            </p>
+            <el-select
+              v-model="selectedProjectId"
+              class="selection-control"
+              filterable
+              placeholder="选择要查询的项目"
+              @change="selectProject"
+            >
+              <el-option
+                v-for="item in projects"
+                :key="item.id"
+                :label="item.name"
+                :value="item.id"
+              />
+            </el-select>
+            <el-button
+              v-if="!projects.length"
+              type="primary"
+              @click="router.push('/projects/create')"
+            >
+              创建项目
+            </el-button>
+            <small v-else>选定项目后，左侧会显示该项目的历史查询。</small>
+          </section>
+
+          <section
+            v-else-if="conversationLoading"
+            role="status"
+            aria-label="正在读取项目查询记录"
+          >
+            <el-skeleton :rows="6" animated />
+            <p>正在读取项目与历史查询…</p>
+          </section>
+          <ChatWelcome
+            v-else-if="!activeConversation"
+            :has-project="Boolean(selectedProject)"
+            :project-name="selectedProject?.project.name || '当前项目'"
+            :project-status="selectedProject?.project.status"
+            :version-number="activeVersion?.versionNumber"
+            :query-ready="selectedProjectHealth?.queryReady"
+            :has-conversation="conversations.length > 0"
+            :suggested-questions="welcomeExamples"
+            :next-action="selectedProjectHealth?.nextActions?.[0]"
+            @create-project="router.push('/projects/create')"
+            @create-conversation="createConversation"
+            @manage-project="openProjectPreparation"
+            @use-example="useWelcomeExample"
+          />
+
+          <template v-else>
+            <ChatWelcome
+              v-if="!messages.length && !activeRun"
+              :has-project="Boolean(selectedProject)"
+              :project-name="selectedProject?.project.name || '当前项目'"
+              :version-number="conversationVersion?.versionNumber"
+              :query-ready="selectedProjectHealth?.queryReady"
+              :has-conversation="true"
+              :conversation-started="true"
+              :suggested-questions="welcomeExamples"
+              @use-example="useWelcomeExample"
+              @manage-project="openProjectPreparation"
+            />
+            <template v-for="item in messages" :key="item.messageId">
+              <article v-if="item.role === 'USER'" class="message user">
+                <div class="message-meta">
+                  <strong>你</strong>
+                  <span>{{ formatTime(item.createTime) }}</span>
+                </div>
+                <div v-if="messageCorrection(item)" class="message-content">
+                  已确认纠正：将“{{ messageCorrection(item)?.phrase }}”理解为“{{
+                    messageCorrection(item)?.confirmedMeaning
+                  }}”。
+                  <details>
+                    <summary>查看原问题</summary>
+                    {{ item.content }}
+                  </details>
+                </div>
+                <div v-else class="message-content">{{ item.content }}</div>
+              </article>
+
+              <AnswerCard
+                v-else-if="item.role === 'ASSISTANT'"
+                :content="messageAnswerContent(item)"
+                :create-time="item.createTime"
+                :status="item.status"
+                :semantic-update="
+                  messageMetadata(item).requestKind === 'SEMANTIC_UPDATE'
+                "
+                :run-id="item.runId"
+                :explanation="messageExplanation(item)"
+                :task-answers="messageTaskAnswers(item)"
+                :artifact-id="messageArtifactId(item)"
+                :artifact="artifactViews[messageArtifactKey(item)]?.artifact"
+                :artifact-columns="
+                  artifactViews[messageArtifactKey(item)]?.columns || []
+                "
+                :artifact-rows="
+                  artifactViews[messageArtifactKey(item)]?.rows || []
+                "
+                :artifact-loading="
+                  artifactViews[messageArtifactKey(item)]?.loading
+                "
+                :artifact-error="artifactViews[messageArtifactKey(item)]?.error"
+                :show-feedback-actions="
+                  Boolean(
+                    item.runId &&
+                    canSubmitPersonalFeedback &&
+                    item.status === 'SUCCEEDED' &&
+                    messageMetadata(item).requestKind !== 'SEMANTIC_UPDATE' &&
+                    !feedbackSubmittedRunIds.has(item.runId) &&
+                    (!correctionMode || correctionRun?.runId !== item.runId),
+                  )
+                "
+                :feedback-loading="submittingAnswerFeedback"
+                @trust="item.runId && submitAnswerFeedback(item.runId, true)"
+                @correct="item.runId && startCorrection(item.runId)"
+                @diagnosis="item.runId && openDiagnosis(item.runId)"
+                @run-details="item.runId && openRunDetails(item.runId)"
+              >
+                <template #feedback>
+                  <div
+                    v-if="item.runId === correctionRun?.runId && correctionMode"
+                    class="answer-correction-panel"
+                  >
+                    <div class="correction-heading">
+                      <div>
+                        <strong>修正这条答案的理解</strong>
+                        <span
+                          >系统会先阻止错误轨迹继续学习，再按你确认的范围处理修正。</span
+                        >
+                      </div>
+                      <el-button link @click="cancelCorrection">取消</el-button>
+                    </div>
+                    <div class="correction-kind-grid">
+                      <button
+                        v-for="option in correctionQuickOptions"
+                        :key="option.value"
+                        type="button"
+                        class="correction-kind"
+                        :class="{ active: correctionCategory === option.value }"
+                        @click="selectCorrectionCategory(option.value)"
+                      >
+                        <strong>{{ option.label }}</strong>
+                        <small>{{ option.description }}</small>
+                      </button>
+                    </div>
+                    <el-collapse
+                      v-if="canSubmitProjectRule"
+                      class="correction-advanced"
+                    >
+                      <el-collapse-item title="高级纠错与治理">
+                        <el-select
+                          v-model="correctionCategory"
+                          placeholder="选择高级问题类型"
+                          @change="loadCorrectionOptions"
+                        >
+                          <el-option label="指标映射" value="METRIC" />
+                          <el-option label="维度映射" value="DIMENSION" />
+                          <el-option label="枚举映射" value="ENUM_VALUE" />
+                          <el-option label="时间语义" value="TIME" />
+                          <el-option label="过滤条件" value="FILTER" />
+                          <el-option label="关联关系" value="RELATIONSHIP" />
+                          <el-option label="业务定义" value="DEFINITION" />
+                          <el-option label="规划策略" value="PLANNING" />
+                          <el-option label="数据质量" value="DATA_QUALITY" />
+                          <el-option label="其他" value="OTHER" />
+                        </el-select>
+                      </el-collapse-item>
+                    </el-collapse>
+                    <template v-if="bindingCorrectionCategory">
+                      <el-input
+                        v-model="correctionRawExpression"
+                        placeholder="输入原问题中的业务词或短语"
+                      />
+                      <el-select
+                        v-model="correctionAssetKey"
+                        filterable
+                        remote
+                        :remote-method="correctionSearch.search"
+                        :loading="correctionOptionsLoading"
+                        placeholder="你实际想表达的是"
+                      >
+                        <el-option
+                          v-for="option in correctionOptions"
+                          :key="option.assetKey"
+                          :label="option.businessLabel"
+                          :value="option.assetKey"
+                        />
+                      </el-select>
+                      <el-button
+                        v-if="correctionHasMore"
+                        :loading="correctionOptionsLoading"
+                        @click="correctionSearch.loadMore"
+                        >加载更多业务含义</el-button
+                      >
+                      <el-radio-group
+                        v-model="correctionScope"
+                        size="small"
+                        class="correction-scope"
+                      >
+                        <el-radio-button value="QUERY"
+                          >仅修正这次</el-radio-button
+                        >
+                        <el-radio-button value="USER"
+                          >以后按我的习惯理解</el-radio-button
+                        >
+                        <el-radio-button
+                          v-if="canSubmitProjectRule"
+                          value="PROJECT"
+                        >
+                          允许分享为项目建议
+                        </el-radio-button>
+                      </el-radio-group>
+                    </template>
+                    <el-input
+                      v-model="answerFeedbackComment"
+                      type="textarea"
+                      :autosize="{ minRows: 2, maxRows: 5 }"
+                      :placeholder="
+                        bindingCorrectionCategory
+                          ? '可选：补充为什么原理解不对'
+                          : correctionCategory === 'PLANNING'
+                            ? '说明这次规划哪里不合理，以及什么情况下应该怎样规划'
+                            : '请直接说明哪里不对、你期望怎样理解或结果应该是什么'
+                      "
+                    />
+                    <div class="answer-feedback-actions">
+                      <el-button
+                        type="primary"
+                        :loading="submittingAnswerFeedback"
+                        :disabled="
+                          !correctionCategory ||
+                          (bindingCorrectionCategory &&
+                            (!correctionRawExpression.trim() ||
+                              !correctionAssetKey)) ||
+                          (!bindingCorrectionCategory &&
+                            !answerFeedbackComment.trim())
+                        "
+                        @click="submitCorrection"
+                      >
+                        {{
+                          bindingCorrectionCategory
+                            ? "修正并重新查询"
+                            : "提交纠正"
+                        }}
+                      </el-button>
+                    </div>
+                  </div>
+                  <el-alert
+                    v-else-if="
+                      item.runId && feedbackSubmittedRunIds.has(item.runId)
+                    "
+                    class="answer-feedback-saved"
+                    type="success"
+                    show-icon
+                    :closable="false"
+                    title="这条答案的反馈已保存。明确确认与纠错会作为不同质量信号记录。"
+                  />
+                </template>
+
+                <template #learning>
+                  <div
+                    v-for="prompt in messageUpgradePrompts(item)"
+                    :key="prompt.preferenceId"
+                    class="preference-upgrade"
+                  >
+                    <span>
+                      你已经多次使用“{{
+                        prompt.phrase || prompt.displayPhrase
+                      }}”表示“{{ prompt.businessLabel }}”。{{
+                        canSubmitProjectRule
+                          ? "可以分享完整口径供项目成员确认使用；正式成为项目口径需要满足发布条件。"
+                          : "系统会继续把它作为你的个人选择使用。"
+                      }}
+                    </span>
+                    <p v-if="prompt.completeDefinition">
+                      将分享的完整口径：{{ prompt.completeDefinition }}
+                    </p>
+                    <div>
+                      <el-button
+                        v-if="canSubmitProjectRule"
+                        size="small"
+                        type="primary"
+                        :loading="preferenceActionId === prompt.preferenceId"
+                        @click="handlePreferenceUpgrade(prompt, 'PROMOTE')"
+                      >
+                        分享为项目建议
+                      </el-button>
+                      <el-button
+                        size="small"
+                        :loading="preferenceActionId === prompt.preferenceId"
+                        @click="handlePreferenceUpgrade(prompt, 'CONTINUE')"
+                      >
+                        继续作为我的习惯
+                      </el-button>
+                      <el-button
+                        size="small"
+                        text
+                        :loading="preferenceActionId === prompt.preferenceId"
+                        @click="handlePreferenceUpgrade(prompt, 'DISMISS')"
+                      >
+                        不再提醒
+                      </el-button>
+                    </div>
+                  </div>
+                </template>
+              </AnswerCard>
+
+              <article v-else class="message system">
+                <div class="message-meta">
+                  <strong>系统</strong>
+                  <span>{{ formatTime(item.createTime) }}</span>
+                </div>
+                <div class="message-content">{{ item.content }}</div>
+              </article>
+            </template>
+            <el-card
+              v-if="clarification"
+              shadow="never"
+              class="clarification-card"
+            >
+              <template #header>
+                <div class="event-heading">
+                  <strong>请确认这条业务口径</strong>
+                  <span>{{
+                    semanticUpdateRequest
+                      ? "确认后提交口径修改及选定历史影响"
+                      : "确认后会从当前查询继续执行"
+                  }}</span>
+                </div>
+              </template>
+              <h3>{{ clarification.question }}</h3>
+              <p v-if="clarification.reason" class="clarification-reason">
+                {{ clarification.reason }}
+              </p>
+              <el-radio-group
+                v-model="selectedClarificationOption"
+                class="clarification-options"
+              >
+                <el-radio
+                  v-for="option in clarification.options"
+                  :key="option.code"
+                  :value="option.code"
+                  border
+                >
+                  <span class="clarification-option-content">
+                    <strong>{{ option.label }}</strong>
+                    <small
+                      v-if="
+                        option.reason && option.reason !== clarification.reason
+                      "
+                      >{{ option.reason }}</small
+                    >
+                  </span>
+                </el-radio>
+              </el-radio-group>
+              <el-input
+                v-model="clarificationCustomAnswer"
+                type="textarea"
+                :autosize="{ minRows: 2, maxRows: 5 }"
+                placeholder="候选都不符合时可补充你的实际含义"
+              />
+              <div
+                v-if="clarificationAllowsDurableScope"
+                class="clarification-scope"
+              >
+                <span>这次选择：</span>
+                <el-radio-group
+                  v-model="selectedClarificationScope"
+                  size="small"
+                >
+                  <el-radio-button
+                    v-if="
+                      clarification.assetType !== 'SEMANTIC_DEFINITION_UPDATE'
+                    "
+                    value="QUERY"
+                    >仅本次</el-radio-button
+                  >
+                  <el-radio-button value="USER">保存我的口径</el-radio-button>
+                  <el-radio-button v-if="canSubmitProjectRule" value="PROJECT">
+                    允许分享为项目建议
+                  </el-radio-button>
+                </el-radio-group>
+              </div>
+              <div class="clarification-actions">
+                <el-button
+                  type="primary"
+                  :loading="answeringClarification"
+                  :disabled="
+                    !selectedClarificationOption &&
+                    !clarificationCustomAnswer.trim()
+                  "
+                  @click="answerClarification"
+                >
+                  提交澄清
+                </el-button>
+              </div>
+            </el-card>
+
+            <el-card
+              v-else-if="humanReviewRequired"
+              shadow="never"
+              class="human-review-card"
+            >
+              <template #header>
+                <div class="event-heading">
+                  <strong>请确认查询计划</strong>
+                  <span>确认后会按当前理解生成并执行查询</span>
+                </div>
+              </template>
+              <p class="human-review-summary">{{ humanReviewSummary }}</p>
+              <el-input
+                v-model="humanReviewFeedback"
+                type="textarea"
+                :autosize="{ minRows: 2, maxRows: 6 }"
+                placeholder="如果理解不对，直接说明需要调整的业务口径；批准时可留空"
+              />
+              <div class="human-review-actions">
+                <el-button
+                  type="danger"
+                  plain
+                  :loading="submittingHumanReview"
+                  :disabled="!humanReviewFeedback.trim()"
+                  @click="submitHumanReview(false)"
+                >
+                  修改并重新理解
+                </el-button>
+                <el-button
+                  type="primary"
+                  :loading="submittingHumanReview"
+                  @click="submitHumanReview(true)"
+                >
+                  批准执行
+                </el-button>
+              </div>
+            </el-card>
+          </template>
+        </section>
+
+        <footer v-if="selectedProjectId" class="composer">
+          <button
+            v-if="showLatestButton"
+            class="latest-message-button"
+            type="button"
+            @click="scrollToBottom"
+          >
+            <i class="bi bi-arrow-down"></i>
+            {{
+              clarification || humanReviewRequired
+                ? "查看待确认内容"
+                : "回到最新消息"
+            }}
+          </button>
+          <div class="composer-surface">
+            <el-input
+              v-model="message"
+              class="composer-input"
+              type="textarea"
+              :autosize="{ minRows: 2, maxRows: 6 }"
+              aria-label="要查询的业务问题"
+              :placeholder="composerState.placeholder"
+              :disabled="!composerState.enabled || sending"
+              @keydown.ctrl.enter.prevent="send"
+              @keydown.meta.enter.prevent="send"
+            />
+            <div class="composer-footer">
+              <div class="composer-options">
+                <el-select
+                  v-model="approvalMode"
+                  size="small"
+                  class="approval-select"
+                  :disabled="sending || runBusy"
+                  aria-label="查询执行方式"
+                >
+                  <el-option label="先确认业务口径" value="REQUIRE_APPROVAL" />
+                  <el-option label="直接执行查询" value="AUTO_EXECUTE" />
+                </el-select>
+                <small>
+                  {{
+                    composerVersion
+                      ? `业务模型 v${composerVersion.versionNumber}`
+                      : "尚未发布可查询的业务模型"
+                  }}
+                  · Ctrl/⌘ + Enter 发送
+                </small>
+              </div>
+              <el-button
+                type="primary"
+                :loading="sending"
+                :disabled="!composerState.enabled || !message.trim() || runBusy"
+                :icon="Promotion"
+                @click="send"
+              >
+                发送
+              </el-button>
+            </div>
+          </div>
+          <p class="composer-note">
+            业务语义不明确时，系统会先请你确认，再继续生成查询。
+          </p>
+          <QueryHelp />
+        </footer>
+      </main>
+    </div>
+
+    <RunDetailsDrawer
+      v-model="runDetailsVisible"
+      :loading="runDetailsLoading"
+      :run="detailsRun"
+      :events="detailsEvents"
+      :transport-hint="detailsTransportHint"
+    />
+    <QueryDiagnosisWorkbench
+      v-model="diagnosisVisible"
+      :run-id="diagnosisRunId"
+      @rerun="handleDiagnosisRerun"
+      @open-evolution="openDiagnosisEvolution"
+    />
+  </BaseLayout>
+</template>
+
+<script setup lang="ts">
+import {
+  computed,
+  defineAsyncComponent,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from "vue";
+import { useRoute, useRouter } from "vue-router";
+import { ElMessage } from "element-plus";
+import { clarificationForm } from "@/utils/clarification-form";
+import { isSemanticUpdate } from "@/utils/run-request-kind";
+import { currentPlanReviewSummary } from "@/utils/plan-review";
+import {
+  ConversationDrafts,
+  queryComposerState,
+  uniqueConversations as distinctConversations,
+} from "@/utils/query-workspace";
+import { Plus, Promotion, Search } from "@element-plus/icons-vue";
+import BaseLayout from "@/layouts/BaseLayout.vue";
+import { useCorrectionOptions } from "@/composables/useCorrectionOptions";
+import { usePlatformReadiness } from "@/composables/usePlatformReadiness";
+import AnswerCard from "@/components/chat/AnswerCard.vue";
+import ChatWelcome from "@/components/chat/ChatWelcome.vue";
+import QueryHelp from "@/components/chat/QueryHelp.vue";
+import QueryRunProgress from "@/components/chat/QueryRunProgress.vue";
+import RunDetailsDrawer from "@/components/chat/RunDetailsDrawer.vue";
+import { useDurableRunTransport } from "@/composables/useDurableRunTransport";
+import { canResumeRun, resumeExpired } from "@/utils/run-resume-policy";
+import {
+  canRestoreCursor,
+  mergeSequencedEvents,
+  nextReplayCursor,
+  parseRunCursor,
+  serializeRunCursor,
+} from "@/services/runRecoveryState.mjs";
+import {
+  semEvoSQLService,
+  type ProjectConversation,
+  type ProjectHealth,
+  type ProjectInitializationView,
+  type ProjectMessage,
+  type QueryApprovalMode,
+  type QueryExecutionExplanation,
+  type QueryTaskAnswer,
+  type QueryRun,
+  type ResultArtifact,
+  type RunEvent,
+  type RuntimeClarification,
+  type SemanticBindingScope,
+  type SemanticPreferenceUpgradePrompt,
+  type SemanticProject,
+  type SemanticProjectVersion,
+} from "@/services/semevosql";
+
+const QueryDiagnosisWorkbench = defineAsyncComponent(
+  () => import("@/components/chat/QueryDiagnosisWorkbench.vue"),
+);
+
+interface PersistedRunCursor {
+  projectId: number;
+  conversationId: string;
+  runId: string;
+  lastSequence: number;
+}
+
+interface InlineArtifactView {
+  artifact?: ResultArtifact;
+  columns: string[];
+  rows: Array<Record<string, unknown>>;
+  loading: boolean;
+  error?: string;
+}
+
+const RUN_CURSOR_STORAGE_KEY = "semevosql:project-chat:active-run";
+const TERMINAL_STATUSES = ["SUCCEEDED", "FAILED", "CANCELLED", "EXPIRED"];
+
+const route = useRoute();
+const router = useRouter();
+const projects = ref<SemanticProject[]>([]);
+const versions = ref<SemanticProjectVersion[]>([]);
+const selectedProject = ref<ProjectInitializationView>();
+const selectedProjectId = ref<number>();
+const selectedProjectHealth = ref<ProjectHealth>();
+const initializationError = ref("");
+const { readiness: platformReadiness, error: platformReadinessError } =
+  usePlatformReadiness();
+const projectContextError = ref("");
+const selectedProjectHealthError = ref("");
+const conversationError = ref("");
+const welcomeExamples = ref<string[]>([]);
+const conversations = ref<ProjectConversation[]>([]);
+const activeConversationId = ref<string>();
+const conversationSearch = ref("");
+const showAllConversations = ref(false);
+const conversationPageSize = 12;
+const uniqueConversations = computed(() =>
+  distinctConversations(conversations.value),
+);
+const filteredConversations = computed(() => {
+  const keyword = conversationSearch.value.trim().toLocaleLowerCase();
+  if (!keyword) return uniqueConversations.value;
+  return uniqueConversations.value.filter((item) =>
+    `${item.title || ""} ${item.updateTime || ""}`
+      .toLocaleLowerCase()
+      .includes(keyword),
+  );
+});
+const visibleConversations = computed(() => {
+  const filtered = filteredConversations.value;
+  if (showAllConversations.value || conversationSearch.value.trim())
+    return filtered;
+  const recent = filtered.slice(0, conversationPageSize);
+  const active = conversations.value.find(
+    (item) => item.conversationId === activeConversationId.value,
+  );
+  if (
+    active &&
+    !recent.some((item) => item.conversationId === active.conversationId)
+  ) {
+    return [active, ...recent.slice(0, conversationPageSize - 1)];
+  }
+  return recent;
+});
+const hasMoreConversations = computed(
+  () =>
+    !conversationSearch.value.trim() &&
+    filteredConversations.value.length > conversationPageSize,
+);
+const conversationCountLabel = computed(() => {
+  if (conversationSearch.value.trim())
+    return `匹配 ${filteredConversations.value.length} 条`;
+  if (showAllConversations.value)
+    return `共 ${filteredConversations.value.length} 条`;
+  return `最近显示 ${Math.min(filteredConversations.value.length, conversationPageSize)} 条`;
+});
+const conversationEmptyLabel = computed(() =>
+  conversationSearch.value.trim() ? "没有匹配的历史查询" : "暂无查询会话",
+);
+const activeConversation = computed(() =>
+  conversations.value.find(
+    (item) => item.conversationId === activeConversationId.value,
+  ),
+);
+const messages = ref<ProjectMessage[]>([]);
+const message = ref("");
+const approvalMode = ref<QueryApprovalMode>("REQUIRE_APPROVAL");
+const sending = ref(false);
+const conversationLoading = ref(false);
+const messageLoading = ref(false);
+const activeRun = ref<QueryRun>();
+const clarification = ref<RuntimeClarification>();
+const clarificationLoading = ref(false);
+const selectedClarificationOption = ref("");
+const selectedClarificationScope = ref<SemanticBindingScope>("QUERY");
+const clarificationCustomAnswer = ref("");
+const answeringClarification = ref(false);
+const currentOperatorId = ref("local-operator");
+const preferenceActionId = ref<number>();
+const hiddenUpgradePromptIds = ref<Set<number>>(new Set());
+const humanReviewFeedback = ref("");
+const submittingHumanReview = ref(false);
+const answerFeedbackComment = ref("");
+const submittingAnswerFeedback = ref(false);
+const feedbackSubmittedRunIds = ref<Set<string>>(new Set());
+const correctionRun = ref<QueryRun>();
+const correctionMode = ref(false);
+const correctionCategory = ref("");
+const correctionRawExpression = ref("");
+const correctionAssetKey = ref("");
+const correctionSearch = useCorrectionOptions();
+const {
+  options: correctionOptions,
+  loading: correctionOptionsLoading,
+  hasMore: correctionHasMore,
+} = correctionSearch;
+const correctionScope = ref<SemanticBindingScope>("QUERY");
+const correctionQuickOptions = [
+  {
+    value: "METRIC",
+    label: "业务指标理解错了",
+    description: "当前指标的业务口径不是你想表达的",
+  },
+  {
+    value: "DIMENSION",
+    label: "分组对象理解错了",
+    description: "当前分组对象或维度不是你想表达的",
+  },
+  {
+    value: "ENUM_VALUE",
+    label: "状态或类型理解错了",
+    description: "当前状态、类型或取值映射不对",
+  },
+  {
+    value: "TIME",
+    label: "时间口径理解错了",
+    description: "当前时间字段、时间范围或统计粒度不对",
+  },
+  {
+    value: "DATA_QUALITY",
+    label: "底层数据有问题",
+    description: "查询理解没错，但源数据缺失、延迟或异常",
+  },
+  {
+    value: "OTHER",
+    label: "筛选或其他问题",
+    description: "直接描述哪里不对，系统会记录为错误信号",
+  },
+];
+const artifactViews = ref<Record<string, InlineArtifactView>>({});
+const runDetailsVisible = ref(false);
+const runDetailsLoading = ref(false);
+const detailsRun = ref<QueryRun>();
+const detailsEvents = ref<RunEvent[]>([]);
+const diagnosisVisible = ref(false);
+const diagnosisRunId = ref<string>();
+const versionNoticeDismissed = ref(false);
+const runEvents = ref<RunEvent[]>([]);
+const lastSequence = ref(0);
+const messageArea = ref<HTMLElement>();
+const showLatestButton = ref(false);
+const drafts = new ConversationDrafts();
+watch(
+  [selectedProjectId, activeConversationId],
+  ([projectId, conversationId]) => {
+    message.value = drafts.switchTo(projectId, conversationId, message.value);
+  },
+  { flush: "sync" },
+);
+
+const activeVersion = computed(() =>
+  versions.value.find(
+    (item) =>
+      item.id === selectedProject.value?.project.activePublishedVersionId,
+  ),
+);
+const queryCapabilityReady = computed(
+  () =>
+    platformReadiness.value?.ready === true && !platformReadinessError.value,
+);
+const canCreateConversation = computed(
+  () =>
+    queryCapabilityReady.value &&
+    Boolean(activeVersion.value) &&
+    selectedProjectHealth.value?.queryReady !== false,
+);
+const conversationVersion = computed(() =>
+  versions.value.find(
+    (item) => item.id === activeConversation.value?.projectVersionId,
+  ),
+);
+const composerVersion = computed(() =>
+  activeConversation.value ? conversationVersion.value : activeVersion.value,
+);
+const conversationUsesOlderVersion = computed(
+  () =>
+    Boolean(
+      activeConversation.value &&
+      activeVersion.value &&
+      conversationVersion.value,
+    ) && activeVersion.value?.id !== conversationVersion.value?.id,
+);
+const terminalRun = computed(() =>
+  TERMINAL_STATUSES.includes(activeRun.value?.status || ""),
+);
+const runBusy = computed(() => Boolean(activeRun.value && !terminalRun.value));
+const bindingCorrectionCategory = computed(() =>
+  ["METRIC", "DIMENSION", "ENUM_VALUE", "TIME"].includes(
+    correctionCategory.value,
+  ),
+);
+const resumeClock = ref(Date.now());
+let resumeExpiryTimer: number | undefined;
+watch(
+  activeRun,
+  () => {
+    window.clearTimeout(resumeExpiryTimer);
+    resumeClock.value = Date.now();
+    const deadline = activeRun.value?.resumeDeadlineEpochMillis;
+    if (deadline != null && deadline > resumeClock.value) {
+      resumeExpiryTimer = window.setTimeout(
+        () => {
+          resumeClock.value = Date.now();
+        },
+        Math.min(2147483647, deadline - resumeClock.value + 1),
+      );
+    }
+  },
+  { immediate: true },
+);
+const canResume = computed(() =>
+  canResumeRun(activeRun.value, resumeClock.value),
+);
+const resumeWindowExpired = computed(() =>
+  resumeExpired(activeRun.value, resumeClock.value),
+);
+const latestHumanReviewRequiredEvent = computed(() =>
+  [...runEvents.value]
+    .reverse()
+    .find((event) =>
+      ["QUERY_UNDERSTANDING_READY", "HUMAN_FEEDBACK_REQUIRED"].includes(
+        event.eventType,
+      ),
+    ),
+);
+const latestHumanReviewAnsweredEvent = computed(() =>
+  [...runEvents.value]
+    .reverse()
+    .find((event) =>
+      [
+        "REQUEST_APPROVED",
+        "REQUEST_APPROVAL_REJECTED",
+        "HUMAN_FEEDBACK_ANSWERED",
+        "HUMAN_FEEDBACK_APPLIED",
+      ].includes(event.eventType),
+    ),
+);
+const clarificationAllowsDurableScope = computed(
+  () =>
+    [
+      "METRIC",
+      "DIMENSION",
+      "ENUM_VALUE",
+      "TIME_COLUMN",
+      "TEXT_DEFINITION",
+      "SEMANTIC_DEFINITION_UPDATE",
+    ].includes(clarification.value?.assetType || "") ||
+    (clarification.value?.assetType === "PERSONAL_PUBLIC_UPDATE" &&
+      selectedClarificationOption.value === "OTHER"),
+);
+const semanticUpdateRequest = computed(
+  () =>
+    clarification.value?.assetType === "SEMANTIC_DEFINITION_UPDATE" ||
+    isSemanticUpdate(runEvents.value),
+);
+const canSubmitPersonalFeedback = computed(() => true);
+const canSubmitProjectRule = computed(() => true);
+const humanReviewRequired = computed(() => {
+  if (
+    activeRun.value?.status !== "WAITING_HUMAN" ||
+    clarification.value ||
+    clarificationLoading.value
+  )
+    return false;
+  const required = latestHumanReviewRequiredEvent.value;
+  if (!required) return false;
+  return (
+    !latestHumanReviewAnsweredEvent.value ||
+    latestHumanReviewAnsweredEvent.value.sequence < required.sequence
+  );
+});
+const humanReviewSummary = computed(() => {
+  const event = latestHumanReviewRequiredEvent.value;
+  const snapshotSummary =
+    activeRun.value && event
+      ? currentPlanReviewSummary(
+          runEvents.value,
+          activeRun.value.runId,
+          event.sequence,
+          latestHumanReviewAnsweredEvent.value?.sequence ?? 0,
+        )
+      : undefined;
+  if (snapshotSummary) return snapshotSummary;
+  if (event?.eventType === "QUERY_UNDERSTANDING_READY" && event.payload)
+    return event.payload;
+  const understanding = [...runEvents.value]
+    .reverse()
+    .find(
+      (item) =>
+        item.eventType === "QUERY_UNDERSTANDING_READY" &&
+        item.sequence <= (event?.sequence ?? 0) &&
+        item.sequence > (latestHumanReviewAnsweredEvent.value?.sequence ?? 0),
+    );
+  if (understanding?.payload) return understanding.payload;
+  return "查询理解已生成。请确认是否执行；如果口径不对，直接用自然语言说明需要修改的内容。";
+});
+const composerState = computed(() =>
+  queryComposerState({
+    projectSelected: Boolean(selectedProjectId.value),
+    modelReady: queryCapabilityReady.value,
+    versionReady: Boolean(composerVersion.value),
+    busy: runBusy.value,
+    needsConfirmation: Boolean(
+      clarification.value || humanReviewRequired.value,
+    ),
+  }),
+);
+watch(
+  () => clarification.value?.clarificationId || humanReviewRequired.value,
+  () => {
+    if (clarification.value || humanReviewRequired.value) void scrollToBottom();
+  },
+);
+const runTransport = useDurableRunTransport({
+  isTerminal: () => terminalRun.value,
+  lastSequence: () => lastSequence.value,
+  catchUp: (runId) => catchUpRun(runId),
+  onEvent: (event) => {
+    mergeRunEvents([event]);
+    void refreshRun(event.runId, true);
+    if (
+      ["TODO_COMPLETED", "HUMAN_FEEDBACK_REQUIRED"].includes(event.eventType)
+    ) {
+      void syncMessage(event.runId, true);
+    }
+  },
+  subscribe: (runId, afterSequence, onEvent, onError, onOpen) =>
+    semEvoSQLService.subscribeRun(
+      runId,
+      afterSequence,
+      onEvent,
+      onError,
+      onOpen,
+    ),
+});
+const transportNotice = runTransport.notice;
+const showTransportNotice = computed(() =>
+  Boolean(activeRun.value && !terminalRun.value && transportNotice.value),
+);
+const detailsTransportHint = computed(() => {
+  if (!detailsRun.value || detailsRun.value.runId !== activeRun.value?.runId)
+    return "";
+  return transportNotice.value;
+});
+
+const readPersistedRunCursor = (): PersistedRunCursor | undefined => {
+  const raw = localStorage.getItem(RUN_CURSOR_STORAGE_KEY);
+  const cursor = parseRunCursor(raw) as PersistedRunCursor | undefined;
+  if (raw && !cursor) localStorage.removeItem(RUN_CURSOR_STORAGE_KEY);
+  return cursor;
+};
+
+const persistRunCursor = () => {
+  if (
+    !selectedProjectId.value ||
+    !activeConversationId.value ||
+    !runTransport.followedRunId.value
+  )
+    return;
+  const cursor: PersistedRunCursor = {
+    projectId: selectedProjectId.value,
+    conversationId: activeConversationId.value,
+    runId: runTransport.followedRunId.value,
+    lastSequence: lastSequence.value,
+  };
+  const serialized = serializeRunCursor(cursor);
+  if (serialized) localStorage.setItem(RUN_CURSOR_STORAGE_KEY, serialized);
+};
+
+const clearPersistedRunCursor = (runId?: string) => {
+  const cursor = readPersistedRunCursor();
+  if (!runId || cursor?.runId === runId)
+    localStorage.removeItem(RUN_CURSOR_STORAGE_KEY);
+};
+
+const clearClarification = () => {
+  clarification.value = undefined;
+  selectedClarificationOption.value = "";
+  selectedClarificationScope.value = "QUERY";
+  clarificationCustomAnswer.value = "";
+};
+
+const loadClarification = async (runId: string) => {
+  if (activeRun.value?.status !== "WAITING_HUMAN") {
+    clearClarification();
+    return;
+  }
+  clarificationLoading.value = true;
+  try {
+    const loaded = await semEvoSQLService.clarification(runId);
+    if (
+      activeRun.value?.runId !== runId ||
+      activeRun.value.status !== "WAITING_HUMAN"
+    )
+      return;
+    const form = clarificationForm(clarification.value, loaded, {
+      selectedOption: selectedClarificationOption.value,
+      scope: selectedClarificationScope.value,
+      customAnswer: clarificationCustomAnswer.value,
+    });
+    clarification.value = loaded;
+    selectedClarificationOption.value = form.selectedOption;
+    selectedClarificationScope.value = form.scope;
+    clarificationCustomAnswer.value = form.customAnswer;
+  } catch {
+    if (
+      activeRun.value?.runId !== runId ||
+      activeRun.value.status !== "WAITING_HUMAN"
+    )
+      clearClarification();
+  } finally {
+    clarificationLoading.value = false;
+  }
+};
+
+const mergeRunEvents = (events: RunEvent[]) => {
+  if (!events.length) return;
+  const merged = mergeSequencedEvents(runEvents.value, events) as {
+    events: RunEvent[];
+    lastSequence: number;
+  };
+  runEvents.value = merged.events;
+  lastSequence.value = merged.lastSequence || lastSequence.value;
+  persistRunCursor();
+};
+
+const replayMissingEvents = async (runId: string, afterSequence: number) => {
+  let cursor = Math.max(0, afterSequence);
+  for (let page = 0; page < 20; page += 1) {
+    const batch = await semEvoSQLService.runEvents(runId, cursor, 500);
+    mergeRunEvents(batch);
+    if (batch.length < 500) return;
+    const nextCursor = nextReplayCursor(batch, cursor);
+    if (nextCursor <= cursor) return;
+    cursor = nextCursor;
+  }
+};
+
+const syncMessage = async (runId: string, quiet = false) => {
+  if (!selectedProjectId.value || !activeConversationId.value) return;
+  try {
+    await semEvoSQLService.syncProjectMessage(
+      selectedProjectId.value,
+      activeConversationId.value,
+      runId,
+    );
+    const view = await semEvoSQLService.projectConversation(
+      selectedProjectId.value,
+      activeConversationId.value,
+    );
+    messages.value = view.messages;
+    feedbackSubmittedRunIds.value = new Set(view.feedbackSubmittedRunIds ?? []);
+    void loadMessageArtifacts(view.messages);
+    if (!showLatestButton.value) await scrollToBottom();
+  } catch (error) {
+    if (!quiet)
+      ElMessage.error(
+        error instanceof Error ? error.message : "消息状态同步失败",
+      );
+  }
+};
+
+const refreshRun = async (runId: string, quiet = false) => {
+  if (!runTransport.isFollowing(runId)) return;
+  try {
+    activeRun.value = await semEvoSQLService.run(runId);
+    await loadClarification(runId);
+    if (terminalRun.value) {
+      runTransport.stop(false);
+      clearPersistedRunCursor(runId);
+      await syncMessage(runId, true);
+    }
+  } catch (error) {
+    if (!quiet) throw error;
+  }
+};
+
+const catchUpRun = async (runId: string) => {
+  if (!runTransport.isFollowing(runId)) return;
+  await replayMissingEvents(runId, lastSequence.value);
+  await refreshRun(runId, true);
+};
+
+const loadWelcomeExamples = async () => {
+  welcomeExamples.value = [];
+  if (!selectedProjectId.value || !activeVersion.value) return;
+  try {
+    const catalog = await semEvoSQLService.semanticCatalog(
+      selectedProjectId.value,
+      activeVersion.value.id,
+    );
+    const metric = catalog.metrics.find((item) => {
+      if (item.status !== "ENABLED" || !item.timeColumn) return false;
+      return (
+        catalog.models.some(
+          (model) =>
+            model.status === "ENABLED" && model.modelCode === item.modelCode,
+        ) &&
+        catalog.columns.some(
+          (column) =>
+            column.status === "ENABLED" &&
+            column.modelCode === item.modelCode &&
+            column.columnName === item.timeColumn &&
+            column.allowSendToLlm === true,
+        )
+      );
+    });
+    if (!metric) return;
+    const metricName = String(
+      metric.businessName || metric.metricCode || "",
+    ).trim();
+    const time = catalog.columns.find(
+      (column) =>
+        column.modelCode === metric.modelCode &&
+        column.columnName === metric.timeColumn,
+    );
+    const timeName = String(time?.businessName || metric.timeColumn).trim();
+    if (!metricName || !timeName) return;
+    const dimension = catalog.dimensions.find(
+      (item) =>
+        item.status === "ENABLED" &&
+        item.modelCode === metric.modelCode &&
+        item.dimensionType !== "TIME" &&
+        item.columnName !== metric.timeColumn &&
+        catalog.columns.some(
+          (column) =>
+            column.status === "ENABLED" &&
+            column.modelCode === item.modelCode &&
+            column.columnName === item.columnName &&
+            column.allowProjection === true &&
+            column.allowSendToLlm === true,
+        ),
+    );
+    const suggestions = [`按${timeName}统计，上个月${metricName}是多少？`];
+    if (dimension) {
+      const dimensionName = String(
+        dimension.businessName || dimension.dimensionCode || "",
+      ).trim();
+      if (dimensionName)
+        suggestions.push(
+          `按${timeName}统计，上个月各${dimensionName}的${metricName}分别是多少？`,
+        );
+    }
+    suggestions.push(
+      `按${timeName}统计，本周${metricName}和上周相比有什么变化？`,
+    );
+    welcomeExamples.value = suggestions.slice(0, 3);
+  } catch {
+    welcomeExamples.value = [];
+  }
+};
+
+const reloadSelectedProjectHealth = async () => {
+  selectedProjectHealthError.value = "";
+  if (!selectedProjectId.value) {
+    selectedProjectHealth.value = undefined;
+    return;
+  }
+  try {
+    selectedProjectHealth.value = await semEvoSQLService.projectHealth(
+      selectedProjectId.value,
+    );
+  } catch (error) {
+    selectedProjectHealth.value = undefined;
+    selectedProjectHealthError.value =
+      error instanceof Error ? error.message : "项目健康状态读取失败";
+  }
+};
+
+const loadProject = async (recovery?: PersistedRunCursor) => {
+  runTransport.stop(true);
+  activeConversationId.value = undefined;
+  messages.value = [];
+  artifactViews.value = {};
+  runEvents.value = [];
+  lastSequence.value = 0;
+  activeRun.value = undefined;
+  selectedProject.value = undefined;
+  versions.value = [];
+  conversations.value = [];
+  showLatestButton.value = false;
+  selectedProjectHealth.value = undefined;
+  projectContextError.value = "";
+  selectedProjectHealthError.value = "";
+  conversationError.value = "";
+  conversationSearch.value = "";
+  showAllConversations.value = false;
+  clearClarification();
+  humanReviewFeedback.value = "";
+  if (!selectedProjectId.value) return;
+  conversationLoading.value = true;
+  try {
+    const healthPromise = reloadSelectedProjectHealth();
+    [selectedProject.value, versions.value, conversations.value] =
+      await Promise.all([
+        semEvoSQLService.project(selectedProjectId.value),
+        semEvoSQLService.projectVersions(selectedProjectId.value),
+        semEvoSQLService.projectConversations(selectedProjectId.value),
+      ]);
+    await healthPromise;
+    await loadWelcomeExamples();
+    const restoredConversation = canRestoreCursor(
+      recovery,
+      selectedProjectId.value,
+      conversations.value.map((item) => item.conversationId),
+    )
+      ? recovery?.conversationId
+      : undefined;
+    const conversationId =
+      restoredConversation || conversations.value[0]?.conversationId;
+    if (conversationId) {
+      await selectConversation(
+        conversationId,
+        restoredConversation ? recovery?.runId : undefined,
+        restoredConversation ? recovery?.lastSequence : 0,
+      );
+    }
+  } catch (error) {
+    projectContextError.value =
+      error instanceof Error ? error.message : "查询工作台上下文加载失败";
+  } finally {
+    conversationLoading.value = false;
+  }
+};
+
+const projectIdFromRoute = (value: unknown) => {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const projectId = Number(raw);
+  return Number.isFinite(projectId) && projectId > 0 ? projectId : undefined;
+};
+
+const selectProject = async () => {
+  const query = { ...route.query };
+  if (selectedProjectId.value)
+    query.projectId = String(selectedProjectId.value);
+  else delete query.projectId;
+  await router.replace({ query });
+};
+
+const createConversation = async () => {
+  if (!queryCapabilityReady.value) {
+    ElMessage.warning("模型服务当前不可用，暂时不能创建新的查询会话");
+    return;
+  }
+  if (!selectedProjectId.value || !canCreateConversation.value) return;
+  try {
+    const created = await semEvoSQLService.createProjectConversation(
+      selectedProjectId.value,
+      "新对话",
+    );
+    conversations.value = [created, ...conversations.value];
+    await selectConversation(created.conversationId);
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "会话创建失败");
+  }
+};
+
+const selectConversation = async (
+  conversationId: string,
+  preferredRunId?: string,
+  restoredSequence = 0,
+) => {
+  if (!selectedProjectId.value) return;
+  runTransport.stop(true);
+  clearClarification();
+  humanReviewFeedback.value = "";
+  versionNoticeDismissed.value = false;
+  conversationError.value = "";
+  activeConversationId.value = conversationId;
+  messages.value = [];
+  artifactViews.value = {};
+  runEvents.value = [];
+  activeRun.value = undefined;
+  messageLoading.value = true;
+  try {
+    const view = await semEvoSQLService.projectConversation(
+      selectedProjectId.value,
+      conversationId,
+    );
+    const index = conversations.value.findIndex(
+      (item) => item.conversationId === conversationId,
+    );
+    if (index >= 0) conversations.value[index] = view.conversation;
+    messages.value = view.messages;
+    feedbackSubmittedRunIds.value = new Set(view.feedbackSubmittedRunIds ?? []);
+    void loadMessageArtifacts(view.messages);
+    const messageRunIds = new Set(
+      view.messages.flatMap((item) => (item.runId ? [item.runId] : [])),
+    );
+    const latestRunId = [...view.messages]
+      .reverse()
+      .find((item) => item.runId)?.runId;
+    const runId =
+      preferredRunId && messageRunIds.has(preferredRunId)
+        ? preferredRunId
+        : latestRunId;
+    if (runId) await followRun(runId, restoredSequence);
+    else clearPersistedRunCursor();
+    await scrollToBottom();
+  } catch (error) {
+    conversationError.value =
+      error instanceof Error ? error.message : "会话加载失败";
+  } finally {
+    messageLoading.value = false;
+  }
+};
+
+const send = async () => {
+  if (sending.value || !composerState.value.enabled) return;
+  if (!queryCapabilityReady.value) {
+    ElMessage.warning(
+      "模型服务当前不可用，历史会话仍可查看，但暂时不能发起新查询",
+    );
+    return;
+  }
+  if (!selectedProjectId.value || !message.value.trim()) return;
+  const content = message.value.trim();
+  sending.value = true;
+  try {
+    if (!activeConversationId.value) await createConversation();
+    if (!activeConversationId.value) return;
+    await semEvoSQLService.sendProjectMessage(
+      selectedProjectId.value,
+      activeConversationId.value,
+      content,
+      approvalMode.value,
+    );
+    message.value = "";
+    await selectConversation(activeConversationId.value);
+  } catch (error) {
+    message.value = content;
+    ElMessage.error(error instanceof Error ? error.message : "消息发送失败");
+  } finally {
+    sending.value = false;
+  }
+};
+
+const followRun = async (runId: string, restoredSequence = 0) => {
+  const runChanged = runTransport.begin(runId);
+  if (runChanged) resetCorrection();
+  runEvents.value = [];
+  lastSequence.value = Math.max(0, restoredSequence);
+  try {
+    activeRun.value = await semEvoSQLService.run(runId);
+    await replayMissingEvents(runId, 0);
+    await loadClarification(runId);
+    persistRunCursor();
+    if (terminalRun.value) {
+      clearPersistedRunCursor(runId);
+      await syncMessage(runId, true);
+    } else if (navigator.onLine) {
+      runTransport.connect(runId);
+    } else {
+      runTransport.handleOffline();
+    }
+    await scrollToBottom();
+  } catch (error) {
+    ElMessage.error(
+      error instanceof Error ? error.message : "查询状态加载失败",
+    );
+  }
+};
+
+const messageMetadata = (item: ProjectMessage): Record<string, unknown> => {
+  if (!item.metadataJson) return {};
+  try {
+    return JSON.parse(item.metadataJson) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+};
+
+const messageCorrection = (item: ProjectMessage) => {
+  const correction = messageMetadata(item).bindingCorrection;
+  if (!correction || typeof correction !== "object") return undefined;
+  const value = correction as Record<string, unknown>;
+  return typeof value.phrase === "string" &&
+    typeof value.confirmedMeaning === "string"
+    ? { phrase: value.phrase, confirmedMeaning: value.confirmedMeaning }
+    : undefined;
+};
+
+const messageExplanation = (
+  item: ProjectMessage,
+): QueryExecutionExplanation | undefined =>
+  messageMetadata(item).executionExplanation as
+    QueryExecutionExplanation | undefined;
+
+const messageAnswerContent = (item: ProjectMessage) =>
+  humanReviewRequired.value && item.runId === activeRun.value?.runId
+    ? humanReviewSummary.value
+    : item.content;
+
+const messageTaskAnswers = (item: ProjectMessage): QueryTaskAnswer[] =>
+  (messageMetadata(item).taskAnswers || []) as QueryTaskAnswer[];
+
+const messageUpgradePrompts = (
+  item: ProjectMessage,
+): SemanticPreferenceUpgradePrompt[] => {
+  const prompts = (messageMetadata(item).semanticPreferenceUpgradePrompts ||
+    []) as SemanticPreferenceUpgradePrompt[];
+  return prompts.filter(
+    (prompt) => !hiddenUpgradePromptIds.value.has(prompt.preferenceId),
+  );
+};
+
+const handlePreferenceUpgrade = async (
+  prompt: SemanticPreferenceUpgradePrompt,
+  action: "PROMOTE" | "CONTINUE" | "DISMISS",
+) => {
+  const preferenceId = prompt.preferenceId;
+  preferenceActionId.value = preferenceId;
+  try {
+    if (action === "PROMOTE") {
+      if (
+        !prompt.definitionRevision ||
+        !prompt.sourceContentHash ||
+        !prompt.completeDefinition
+      )
+        throw new Error("这条提示缺少完整口径，请使用当前版本的分享确认");
+      await semEvoSQLService.promoteSemanticPreference(preferenceId, {
+        definitionRevision: prompt.definitionRevision,
+        sourceContentHash: prompt.sourceContentHash,
+      });
+    } else if (action === "CONTINUE")
+      await semEvoSQLService.continueSemanticPreference(preferenceId);
+    else await semEvoSQLService.dismissSemanticPreferenceUpgrade(preferenceId);
+    hiddenUpgradePromptIds.value = new Set([
+      ...hiddenUpgradePromptIds.value,
+      preferenceId,
+    ]);
+    ElMessage.success(
+      action === "PROMOTE"
+        ? "已分享为项目建议。你的个人口径继续有效，其他成员需要确认后才能使用。"
+        : action === "CONTINUE"
+          ? "已保留为个人口径，这条分享建议不会重复提醒"
+          : "已关闭这条建议的提醒",
+    );
+  } catch (error) {
+    ElMessage.error(
+      error instanceof Error ? error.message : "语义习惯处理失败",
+    );
+  } finally {
+    preferenceActionId.value = undefined;
+  }
+};
+
+const messageArtifactId = (item: ProjectMessage) => {
+  if (!item.metadataJson) return undefined;
+  try {
+    const metadata = JSON.parse(item.metadataJson) as { artifactId?: string };
+    return metadata.artifactId;
+  } catch {
+    return undefined;
+  }
+};
+
+// Different Todo/revision artifacts cannot share the first result cached for a message.
+const messageArtifactKey = (item: ProjectMessage) =>
+  `${item.messageId}:${item.runId || ""}:${messageArtifactId(item) || ""}`;
+
+const loadMessageArtifact = async (item: ProjectMessage) => {
+  const artifactId = messageArtifactId(item);
+  if (!artifactId || !item.runId) return;
+  const existing = artifactViews.value[messageArtifactKey(item)];
+  if (existing?.loading || existing?.artifact) return;
+  artifactViews.value[messageArtifactKey(item)] = {
+    columns: [],
+    rows: [],
+    loading: true,
+  };
+  try {
+    const result = await semEvoSQLService.resultArtifact(
+      item.runId,
+      artifactId,
+    );
+    artifactViews.value[messageArtifactKey(item)] = {
+      artifact: result,
+      columns: JSON.parse(result.schemaJson) as string[],
+      rows: JSON.parse(result.dataJson) as Array<Record<string, unknown>>,
+      loading: false,
+    };
+  } catch (error) {
+    artifactViews.value[messageArtifactKey(item)] = {
+      columns: [],
+      rows: [],
+      loading: false,
+      error: error instanceof Error ? error.message : "结果数据加载失败",
+    };
+  }
+};
+
+const loadMessageArtifacts = async (items: ProjectMessage[]) => {
+  await Promise.all(
+    items.filter((item) => item.role === "ASSISTANT").map(loadMessageArtifact),
+  );
+};
+
+const openRunDetails = async (runId: string) => {
+  runDetailsVisible.value = true;
+  runDetailsLoading.value = true;
+  detailsRun.value = undefined;
+  detailsEvents.value = [];
+  try {
+    const [run, events] = await Promise.all([
+      semEvoSQLService.run(runId),
+      semEvoSQLService.runEvents(runId, 0, 500),
+    ]);
+    detailsRun.value = run;
+    detailsEvents.value = events;
+  } catch (error) {
+    ElMessage.error(
+      error instanceof Error ? error.message : "运行详情加载失败",
+    );
+  } finally {
+    runDetailsLoading.value = false;
+  }
+};
+
+const openDiagnosis = (runId: string) => {
+  diagnosisRunId.value = runId;
+  diagnosisVisible.value = true;
+};
+
+const handleDiagnosisRerun = async (runId: string) => {
+  diagnosisVisible.value = false;
+  if (activeConversationId.value) {
+    await selectConversation(activeConversationId.value, runId);
+    return;
+  }
+  await followRun(runId);
+};
+
+const openDiagnosisEvolution = (candidateId: string) => {
+  diagnosisVisible.value = false;
+  if (!selectedProjectId.value) return;
+  void router.push({
+    path: `/projects/${selectedProjectId.value}`,
+    query: { section: "evolution", candidateId },
+  });
+};
+
+const openProjectPreparation = () => {
+  if (!selectedProjectId.value) return;
+  const section =
+    selectedProjectHealth.value?.nextActions?.[0]?.target || "overview";
+  void router.push({
+    path: `/projects/${selectedProjectId.value}`,
+    query: { section },
+  });
+};
+
+const handleMobileConversationChange = (conversationId?: string) => {
+  if (conversationId) void selectConversation(conversationId);
+};
+
+const useWelcomeExample = async (example: string) => {
+  if (!activeConversation.value) await createConversation();
+  if (!activeConversation.value) return;
+  message.value = example;
+};
+
+const answerClarification = async () => {
+  if (
+    answeringClarification.value ||
+    !activeRun.value ||
+    !clarification.value ||
+    (!selectedClarificationOption.value &&
+      !clarificationCustomAnswer.value.trim())
+  )
+    return;
+  const runId = activeRun.value.runId;
+  const semanticManagement = semanticUpdateRequest.value;
+  const selectedOption = selectedClarificationOption.value || "OTHER";
+  const selectedScope =
+    selectedOption !== "CANCEL" && clarificationAllowsDurableScope.value
+      ? selectedClarificationScope.value
+      : "QUERY";
+  answeringClarification.value = true;
+  try {
+    await semEvoSQLService.answerClarification(
+      runId,
+      clarification.value,
+      selectedOption,
+      clarificationCustomAnswer.value,
+      selectedScope,
+    );
+    clearClarification();
+    activeRun.value =
+      selectedOption === "CANCEL"
+        ? await semEvoSQLService.run(runId)
+        : await semEvoSQLService.resumeRun(runId);
+    await followRun(runId);
+    await syncMessage(runId);
+    const scopeText =
+      selectedOption === "CANCEL"
+        ? semanticManagement
+          ? "口径修改已取消。"
+          : "查询已取消。"
+        : semanticManagement
+          ? selectedOption === "OTHER"
+            ? "已收到补充，将重新整理并请你确认。"
+            : "已提交本次口径修改确认。"
+          : selectedScope === "USER"
+            ? "已记住你的选择，查询将继续。"
+            : selectedScope === "PROJECT"
+              ? "已保存本次确认，查询将继续。"
+              : "已按本次选择继续查询。";
+    ElMessage.success(scopeText);
+  } catch (error) {
+    ElMessage.error(
+      error instanceof Error ? error.message : "业务含义确认失败",
+    );
+    if (
+      activeRun.value?.runId === runId &&
+      activeRun.value.status === "WAITING_HUMAN"
+    )
+      await loadClarification(runId);
+  } finally {
+    answeringClarification.value = false;
+  }
+};
+
+const submitHumanReview = async (approved: boolean) => {
+  if (
+    !selectedProjectId.value ||
+    !activeConversationId.value ||
+    !activeRun.value
+  )
+    return;
+  const feedback = humanReviewFeedback.value.trim();
+  if (!approved && !feedback) {
+    ElMessage.warning("驳回执行计划时必须填写调整意见");
+    return;
+  }
+  const runId = activeRun.value.runId;
+  submittingHumanReview.value = true;
+  try {
+    activeRun.value = await semEvoSQLService.submitProjectHumanReview(
+      selectedProjectId.value,
+      activeConversationId.value,
+      runId,
+      approved,
+      feedback,
+      crypto.randomUUID(),
+    );
+    humanReviewFeedback.value = "";
+    await followRun(runId);
+    await syncMessage(runId);
+    ElMessage.success(
+      approved
+        ? "查询计划已确认，正在继续查询数据"
+        : "已提交调整意见，正在重新规划查询",
+    );
+  } catch (error) {
+    ElMessage.error(
+      error instanceof Error ? error.message : "查询计划确认失败",
+    );
+  } finally {
+    submittingHumanReview.value = false;
+  }
+};
+
+const markFeedbackSubmitted = (runId: string) => {
+  feedbackSubmittedRunIds.value = new Set([
+    ...feedbackSubmittedRunIds.value,
+    runId,
+  ]);
+};
+
+const resetCorrection = () => {
+  correctionMode.value = false;
+  correctionRun.value = undefined;
+  correctionCategory.value = "";
+  correctionRawExpression.value = "";
+  correctionAssetKey.value = "";
+  correctionSearch.clear();
+  correctionScope.value = "QUERY";
+  answerFeedbackComment.value = "";
+};
+
+const startCorrection = async (runId: string) => {
+  try {
+    const run =
+      activeRun.value?.runId === runId
+        ? activeRun.value
+        : await semEvoSQLService.run(runId);
+    if (run.status !== "SUCCEEDED" || !run.episodeId) {
+      ElMessage.warning("这条答案当前不能提交纠错");
+      return;
+    }
+    resetCorrection();
+    correctionRun.value = run;
+    correctionMode.value = true;
+  } catch (error) {
+    ElMessage.error(
+      error instanceof Error ? error.message : "答案详情加载失败",
+    );
+  }
+};
+
+const cancelCorrection = () => resetCorrection();
+
+const correctionExplanation = () => {
+  const runId = correctionRun.value?.runId;
+  if (!runId) return undefined;
+  const message = [...messages.value]
+    .reverse()
+    .find((item) => item.role === "ASSISTANT" && item.runId === runId);
+  return message ? messageExplanation(message) : undefined;
+};
+
+const selectCorrectionCategory = async (value: string) => {
+  correctionCategory.value = value;
+  await loadCorrectionOptions();
+};
+
+const loadCorrectionOptions = async () => {
+  correctionAssetKey.value = "";
+  correctionSearch.clear();
+  if (!correctionRun.value || !bindingCorrectionCategory.value) return;
+  const assetType =
+    correctionCategory.value === "TIME"
+      ? "TIME_COLUMN"
+      : (correctionCategory.value as "METRIC" | "DIMENSION" | "ENUM_VALUE");
+  const explanation = correctionExplanation();
+  const currentBinding = explanation?.semanticBindings.find(
+    (binding) => String(binding.assetType || "") === assetType,
+  );
+  if (currentBinding) {
+    correctionRawExpression.value = String(
+      currentBinding.displayPhrase || currentBinding.normalizedPhrase || "",
+    );
+  } else if (assetType === "METRIC") {
+    const metric = explanation?.businessDefinitions.find(
+      (definition) => String(definition.type || "") === "METRIC",
+    );
+    correctionRawExpression.value = String(metric?.name || "");
+  }
+  await correctionSearch.reset(correctionRun.value.runId, assetType);
+};
+
+const submitCorrection = async () => {
+  if (
+    !selectedProjectId.value ||
+    !activeConversationId.value ||
+    !correctionRun.value
+  )
+    return;
+  const runId = correctionRun.value.runId;
+  const episodeId = correctionRun.value.episodeId;
+  if (!episodeId || !correctionCategory.value) return;
+  submittingAnswerFeedback.value = true;
+  try {
+    const detail = answerFeedbackComment.value.trim();
+    await semEvoSQLService.submitEpisodeFeedback(
+      episodeId,
+      currentOperatorId.value,
+      1,
+      false,
+      `CORRECTION[${correctionCategory.value}] ${detail || "用户确认当前查询理解有误"}`,
+    );
+    markFeedbackSubmitted(runId);
+    if (bindingCorrectionCategory.value) {
+      const option = correctionOptions.value.find(
+        (item) => item.assetKey === correctionAssetKey.value,
+      );
+      if (!option || !correctionRawExpression.value.trim()) {
+        throw new Error("请选择正确的业务含义并填写原问题中的业务说法");
+      }
+      const rawExpression = correctionRawExpression.value.trim();
+      const selectedScope = correctionScope.value;
+      const result = await semEvoSQLService.correctBinding(
+        selectedProjectId.value,
+        activeConversationId.value,
+        runId,
+        {
+          rawExpression,
+          assetType: option.assetType,
+          assetKey: option.assetKey,
+          businessLabel: option.businessLabel,
+          scope: selectedScope,
+          idempotencyKey: crypto.randomUUID(),
+        },
+      );
+      await selectConversation(activeConversationId.value, result.rerunId);
+      ElMessage.success(
+        selectedScope === "USER"
+          ? `已记住你把“${rawExpression}”理解为“${option.businessLabel}”。后续你的查询会优先使用这个含义。`
+          : selectedScope === "PROJECT"
+            ? `已按“${option.businessLabel}”重新查询，并申请允许分享为项目建议；通过语义验证、回归与发布前不会影响其他用户。`
+            : `已按“${option.businessLabel}”重新查询。这次修正只对本次查询生效。`,
+      );
+    } else {
+      if (
+        ["DEFINITION", "TIME", "FILTER", "RELATIONSHIP", "PLANNING"].includes(
+          correctionCategory.value,
+        )
+      ) {
+        await semEvoSQLService.proposeDefinitionCorrection(
+          selectedProjectId.value,
+          activeConversationId.value,
+          runId,
+          correctionCategory.value as
+            "DEFINITION" | "TIME" | "FILTER" | "RELATIONSHIP" | "PLANNING",
+          detail,
+        );
+      }
+      ElMessage.success(
+        correctionCategory.value === "DATA_QUALITY"
+          ? "已记录为数据质量问题，这条错误结果不会继续参与学习。"
+          : correctionCategory.value === "PLANNING"
+            ? "已提交规划策略改进建议；必须经过回归验证、审核与发布后才会影响后续查询规划。"
+            : ["DEFINITION", "TIME", "FILTER", "RELATIONSHIP"].includes(
+                  correctionCategory.value,
+                )
+              ? "已提交业务模型改进建议；验证与回归测试通过前不会修改正式口径。"
+              : "已记录这次纠正，这条错误结果不会继续参与学习。",
+      );
+      resetCorrection();
+    }
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "纠错提交失败");
+  } finally {
+    submittingAnswerFeedback.value = false;
+  }
+};
+
+const submitAnswerFeedback = async (runId: string, adopted: boolean) => {
+  const comment = answerFeedbackComment.value.trim();
+  if (!adopted && !comment) {
+    ElMessage.warning("标记结果不正确时必须说明具体问题");
+    return;
+  }
+  submittingAnswerFeedback.value = true;
+  try {
+    const run =
+      activeRun.value?.runId === runId
+        ? activeRun.value
+        : await semEvoSQLService.run(runId);
+    if (run.status !== "SUCCEEDED" || !run.episodeId) {
+      throw new Error("这条答案当前不能提交反馈");
+    }
+    await semEvoSQLService.submitEpisodeFeedback(
+      run.episodeId,
+      currentOperatorId.value,
+      adopted ? 5 : 1,
+      adopted,
+      comment,
+    );
+    markFeedbackSubmitted(runId);
+    answerFeedbackComment.value = "";
+    ElMessage.success(
+      adopted
+        ? "已明确确认这条结果正确，并记录为可信答案信号。"
+        : "问题反馈已保存",
+    );
+  } catch (error) {
+    ElMessage.error(
+      error instanceof Error ? error.message : "结果反馈提交失败",
+    );
+  } finally {
+    submittingAnswerFeedback.value = false;
+  }
+};
+
+const resumeRun = async () => {
+  if (!activeRun.value) return;
+  resumeClock.value = Date.now();
+  if (!canResumeRun(activeRun.value, resumeClock.value)) return;
+  const runId = activeRun.value.runId;
+  try {
+    activeRun.value = await semEvoSQLService.resumeRun(runId);
+    await followRun(runId);
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "查询恢复失败");
+  }
+};
+
+const cancelRun = async () => {
+  if (!activeRun.value) return;
+  const runId = activeRun.value.runId;
+  try {
+    activeRun.value = await semEvoSQLService.cancelRun(runId);
+    clearClarification();
+    humanReviewFeedback.value = "";
+    await followRun(runId);
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "取消查询失败");
+  }
+};
+
+const handleOnline = () => runTransport.handleOnline();
+
+const handleOffline = () => runTransport.handleOffline();
+
+const scrollToBottom = async () => {
+  await nextTick();
+  if (messageArea.value)
+    messageArea.value.scrollTop = messageArea.value.scrollHeight;
+  showLatestButton.value = false;
+};
+const updateScrollPosition = () => {
+  const area = messageArea.value;
+  if (area)
+    showLatestButton.value =
+      area.scrollHeight - area.clientHeight - area.scrollTop > 120;
+};
+const formatTime = (value?: string) =>
+  value ? new Date(value).toLocaleString("zh-CN") : "-";
+
+const initializePage = async () => {
+  initializationError.value = "";
+  try {
+    projects.value = await semEvoSQLService.listProjects();
+    const persisted = readPersistedRunCursor();
+    const queryProjectId = projectIdFromRoute(route.query.projectId);
+    selectedProjectId.value = queryProjectId;
+    await loadProject(
+      queryProjectId && persisted?.projectId === queryProjectId
+        ? persisted
+        : undefined,
+    );
+  } catch (error) {
+    initializationError.value =
+      error instanceof Error ? error.message : "查询工作台初始化失败";
+  }
+};
+
+watch(
+  () => route.query.projectId,
+  (value, previousValue) => {
+    if (value === previousValue) return;
+    selectedProjectId.value = projectIdFromRoute(value);
+    void loadProject();
+  },
+);
+
+onMounted(() => {
+  window.addEventListener("online", handleOnline);
+  window.addEventListener("offline", handleOffline);
+  void initializePage();
+});
+onBeforeUnmount(() => {
+  window.clearTimeout(resumeExpiryTimer);
+  window.removeEventListener("online", handleOnline);
+  window.removeEventListener("offline", handleOffline);
+  runTransport.stop(true);
+});
+</script>
+
+<style scoped>
+.chat-shell {
+  display: grid;
+  grid-template-columns: clamp(265px, 20vw, 315px) minmax(0, 1fr);
+  width: 100%;
+  height: 100dvh;
+  background: #f4f6f8;
+}
+.conversation-sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 18px 14px;
+  border-right: 1px solid #dfe8e8;
+  background: #f8fafb;
+}
+.conversation-tools {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+.conversation-count {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 24px;
+  color: #63777e;
+  font-size: 11px;
+}
+.sidebar-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+  gap: 12px;
+}
+.sidebar-title > div {
+  display: grid;
+  gap: 3px;
+}
+.sidebar-kicker {
+  color: #2a9d8f;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+.sidebar-title strong {
+  color: #17353b;
+  font-size: 16px;
+}
+.conversation-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin-top: 8px;
+}
+.mobile-context-bar {
+  display: none;
+}
+.conversation {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  margin-bottom: 5px;
+  padding: 12px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #46636a;
+  text-align: left;
+  cursor: pointer;
+}
+.conversation span {
+  color: #6f838a;
+  font-size: 11px;
+}
+.conversation strong {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.conversation:hover {
+  background: #edf3f3;
+}
+.conversation.active {
+  border-left: 3px solid #2a9d8f;
+  background: #eaf7f3;
+  color: #177d73;
+}
+.chat-main {
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+  flex-direction: column;
+  min-width: 0;
+  background: #f7f9fa;
+}
+.chat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  padding: 12px 24px;
+  border-bottom: 1px solid #dfe8e8;
+  background: #fbfdfd;
+}
+.focus-brand {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px 0 0;
+  border: 0;
+  border-right: 1px solid #dfe8e8;
+  background: transparent;
+  color: #17353b;
+  font-size: 13px;
+  font-weight: 750;
+  cursor: pointer;
+}
+.focus-brand-mark {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 9px;
+  background: #dff3ee;
+  color: #177d73;
+  font-size: 13px;
+}
+.chat-context {
+  flex: 1;
+  min-width: 0;
+}
+.chat-context > span {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.chat-header h1 {
+  margin: 0 0 3px;
+  color: #17353b;
+  font-size: 16px;
+}
+.chat-header span {
+  color: #71858b;
+  font-size: 13px;
+}
+.run-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.message-area {
+  flex: 1;
+  min-height: 0;
+  overscroll-behavior: contain;
+  overflow-y: auto;
+  width: 100%;
+  padding: 34px max(24px, calc((100% - 920px) / 2));
+  background:
+    radial-gradient(circle at 12% 4%, rgb(208 242 235 / 34%), transparent 25%),
+    #f7f9fa;
+}
+.project-selection-empty {
+  display: grid;
+  max-width: 620px;
+  margin: 15vh auto 0;
+  justify-items: center;
+  gap: 10px;
+  padding: 0 20px 36px;
+  text-align: center;
+}
+.selection-icon {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 4px;
+  place-items: center;
+  border-radius: 14px;
+  background: #e2f4ef;
+  color: #177d73;
+  font-size: 21px;
+}
+.selection-kicker {
+  color: #2a9d8f;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+}
+.project-selection-empty h2 {
+  margin: 0;
+  color: #17353b;
+  font-size: clamp(24px, 3vw, 34px);
+  letter-spacing: -0.035em;
+}
+.project-selection-empty p {
+  max-width: 520px;
+  margin: 0 0 6px;
+  color: #536970;
+  line-height: 1.75;
+}
+.selection-control {
+  width: min(360px, 100%);
+  margin-top: 8px;
+}
+.project-selection-empty small {
+  color: #63777e;
+  font-size: 11px;
+}
+.page-error-alert,
+.version-notice {
+  margin: 12px 28px 0;
+}
+.conversation-error-alert {
+  max-width: 760px;
+  margin: 0 auto 18px;
+}
+.inline-recovery {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.version-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.clarification-card,
+.human-review-card {
+  max-width: 760px;
+  margin: 0 auto 20px;
+}
+.clarification-card {
+  border-color: #d6c58d;
+  background: #fffdf7;
+}
+.human-review-card {
+  border-color: #e4b47a;
+  background: #fffaf3;
+}
+.clarification-card h3 {
+  margin: 0 0 8px;
+  color: #17353b;
+}
+.clarification-reason,
+.human-review-summary {
+  margin: 0 0 14px;
+  color: #71858b;
+  line-height: 1.7;
+}
+.clarification-options {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.clarification-options :deep(.el-radio) {
+  height: auto;
+  min-height: 40px;
+  margin-right: 0;
+  padding: 8px 12px;
+}
+.clarification-option-content {
+  display: grid;
+  gap: 2px;
+  white-space: normal;
+}
+.clarification-option-content small {
+  color: #64748b;
+  line-height: 1.4;
+}
+.clarification-scope,
+.correction-scope {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+  color: #475569;
+  font-size: 13px;
+}
+.clarification-actions,
+.human-review-actions,
+.answer-feedback-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+.answer-correction-panel {
+  display: grid;
+  gap: 10px;
+  padding: 16px 18px;
+  border-top: 1px solid #efc7c2;
+  background: #fff8f7;
+}
+.answer-correction-panel :deep(.el-select),
+.answer-correction-panel :deep(.el-input) {
+  width: 100%;
+}
+.correction-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.correction-heading > div {
+  display: grid;
+  gap: 4px;
+}
+.correction-heading span {
+  color: #64748b;
+  font-size: 12px;
+}
+.correction-kind-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.correction-kind {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid #dce7e7;
+  border-radius: 10px;
+  background: #fff;
+  color: #46636a;
+  cursor: pointer;
+  text-align: left;
+}
+.correction-kind:hover,
+.correction-kind.active {
+  border-color: #9bcfc5;
+  background: #eaf7f3;
+}
+.correction-kind small {
+  color: #64748b;
+  line-height: 1.4;
+}
+.correction-advanced {
+  border-top: 1px dashed #cbd5e1;
+}
+.answer-feedback-saved {
+  width: auto;
+  margin: 0 18px 14px;
+}
+.preference-upgrade {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+  background: #eff6ff;
+  color: #334155;
+}
+.preference-upgrade > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.message {
+  max-width: 760px;
+  margin: 0 auto 18px;
+  padding: 16px 18px;
+  border: 1px solid #dce7e7;
+  border-radius: 14px;
+  background: #fff;
+}
+.message.user {
+  max-width: 650px;
+  border-color: #173f43;
+  background: #173f43;
+  box-shadow: 0 8px 18px rgb(23 63 67 / 12%);
+}
+.message-meta,
+.event-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #71858b;
+  font-size: 12px;
+}
+.message-content {
+  margin-top: 10px;
+  color: #213e46;
+  white-space: pre-wrap;
+  line-height: 1.7;
+}
+.message.user .message-meta,
+.message.user .message-content {
+  color: #e8f7f3;
+}
+.message.user .message-meta span {
+  color: #a9d0ca;
+}
+.composer {
+  position: relative;
+  padding: 12px max(24px, calc((100% - 920px) / 2)) 14px;
+  border-top: 1px solid #dfe8e8;
+  background: #fbfdfd;
+  box-shadow: 0 -8px 20px rgb(22 58 63 / 3%);
+}
+.latest-message-button {
+  position: absolute;
+  bottom: calc(100% + 12px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 16px;
+  border: 1px solid #cbdedb;
+  border-radius: 99px;
+  background: #fff;
+  color: #177d73;
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.composer-surface {
+  padding: 8px 10px 8px 14px;
+  border: 1px solid #cbdedb;
+  border-radius: 15px;
+  background: #fff;
+  box-shadow: 0 6px 18px rgb(22 58 63 / 6%);
+}
+.composer-input :deep(.el-textarea__inner) {
+  min-height: 62px !important;
+  padding: 8px 0;
+  border: 0;
+  box-shadow: none !important;
+  background: transparent;
+}
+.composer-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-top: 5px;
+  color: #63777e;
+  font-size: 12px;
+}
+.composer-options {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  min-width: 0;
+}
+.composer-options small {
+  color: #536970;
+}
+.approval-select {
+  width: 132px;
+}
+.composer-note {
+  margin: 7px 2px 0;
+  color: #63777e;
+  font-size: 11px;
+  text-align: center;
+}
+.composer :deep(.el-textarea__inner) {
+  min-height: 78px !important;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: #fff;
+  color: #213e46;
+  line-height: 1.65;
+}
+.composer :deep(.el-textarea__inner::placeholder) {
+  color: #9aa9ad;
+}
+@media (max-width: 850px) {
+  .chat-shell {
+    grid-template-columns: 1fr;
+  }
+  .conversation-sidebar {
+    display: none;
+  }
+  .mobile-context-bar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    gap: 8px;
+    padding: 10px 14px;
+    border-bottom: 1px solid #dfe8e8;
+    background: #fbfdfd;
+  }
+  .chat-header {
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 12px 16px;
+  }
+  .focus-brand {
+    border-right: 0;
+    padding-right: 0;
+  }
+  .run-actions {
+    flex-wrap: wrap;
+  }
+  .message-area,
+  .composer {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+  .composer-surface {
+    padding-left: 12px;
+  }
+  .composer-footer {
+    align-items: center;
+    gap: 8px;
+  }
+  .composer-options {
+    gap: 4px;
+  }
+  .composer-footer > .el-button {
+    flex: 0 0 auto;
+  }
+  .page-error-alert,
+  .version-notice {
+    margin-right: 14px;
+    margin-left: 14px;
+  }
+  .inline-recovery {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+@media (max-width: 560px) {
+  .focus-brand {
+    display: none;
+  }
+  .mobile-context-bar {
+    padding: 8px 12px;
+  }
+  .chat-header {
+    padding: 10px 12px;
+  }
+  .chat-context {
+    width: 100%;
+    flex-basis: 100%;
+  }
+  .run-actions {
+    justify-content: flex-start;
+  }
+  .composer {
+    padding: 8px 12px max(8px, env(safe-area-inset-bottom));
+  }
+  .composer-options small,
+  .composer-note {
+    display: none;
+  }
+}
+</style>
