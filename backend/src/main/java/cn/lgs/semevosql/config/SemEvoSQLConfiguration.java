@@ -72,7 +72,8 @@ import static com.alibaba.cloud.ai.graph.action.AsyncEdgeAction.edge_async;
 @Configuration
 @EnableAsync
 @EnableConfigurationProperties({ CodeExecutorProperties.class, ConversationContextProperties.class,
-		SemEvoSQLProperties.class, FileStorageProperties.class, ModelClientProperties.class })
+		SemEvoSQLProperties.class, FileStorageProperties.class, ModelClientProperties.class,
+		cn.lgs.semevosql.common.OperatorContextProperties.class })
 public class SemEvoSQLConfiguration {
 
 	@Bean
@@ -134,6 +135,7 @@ public class SemEvoSQLConfiguration {
 			keyStrategyHashMap.put(EPISODE_ID, KeyStrategy.REPLACE);
 			keyStrategyHashMap.put(ATTEMPT_ID, KeyStrategy.REPLACE);
 			keyStrategyHashMap.put(RUN_ID, KeyStrategy.REPLACE);
+			keyStrategyHashMap.put(RUN_DEADLINE_EPOCH_MILLIS, KeyStrategy.REPLACE);
 			// EVIDENCE节点输出
 			keyStrategyHashMap.put(EVIDENCE, KeyStrategy.REPLACE);
 			// schema recall节点输出

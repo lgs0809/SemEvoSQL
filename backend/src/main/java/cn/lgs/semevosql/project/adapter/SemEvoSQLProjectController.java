@@ -16,7 +16,6 @@
 package cn.lgs.semevosql.project.adapter;
 
 import cn.lgs.semevosql.common.OperatorContext;
-import cn.lgs.semevosql.common.OperatorContextProperties;
 import cn.lgs.semevosql.project.application.ProjectDatasourceBindingService;
 import cn.lgs.semevosql.project.application.ProjectDatasourceBindingService.BindingDefinition;
 import cn.lgs.semevosql.project.application.ProjectHealthApplicationService;
@@ -31,9 +30,6 @@ import cn.lgs.semevosql.project.domain.ProjectVersionCreationMode;
 import cn.lgs.semevosql.project.domain.SemanticGap;
 import cn.lgs.semevosql.project.domain.SemanticProject;
 import cn.lgs.semevosql.project.domain.SemanticProjectVersion;
-import cn.lgs.semevosql.project.security.ProjectAccessRole;
-import cn.lgs.semevosql.project.security.ProjectAccessService;
-import cn.lgs.semevosql.project.security.ProjectAccessService.ProjectMembership;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
@@ -44,7 +40,6 @@ import java.security.Principal;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -54,7 +49,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
@@ -72,10 +66,6 @@ public class SemEvoSQLProjectController {
 	private final ProjectReleaseCenterApplicationService releaseCenterService;
 
 	private final OperatorContext.Resolver operatorResolver;
-
-	private final OperatorContextProperties operatorProperties;
-
-	private final ProjectAccessService projectAccessService;
 
 	@PostMapping("/projects")
 	public ProjectInitializationView createProject(@Valid @RequestBody CreateProjectRequest request,
@@ -237,45 +227,6 @@ public class SemEvoSQLProjectController {
 				operatorResolver.resolve(headers, principal, "project-version-activate:" + versionId));
 	}
 
-	@GetMapping("/projects/{projectId}/access")
-	public ProjectAccessView projectAccess(@PathVariable Long projectId, @RequestHeader HttpHeaders headers,
-			Principal principal) {
-		OperatorContext operator = operatorResolver.resolve(headers, principal, "project-access-view:" + projectId);
-		return new ProjectAccessView(projectId,
-				projectAccessService.requireAccess(projectId, operator, ProjectAccessRole.VIEWER),
-				projectAccessService.isGlobalAdmin(operator));
-	}
-
-	@GetMapping("/projects/{projectId}/members")
-	public List<ProjectMembership> listMembers(@PathVariable Long projectId, @RequestHeader HttpHeaders headers,
-			Principal principal) {
-		requireMultiUserMode();
-		return projectAccessService.listMembers(projectId,
-				operatorResolver.resolve(headers, principal, "project-members-list:" + projectId));
-	}
-
-	@PutMapping("/projects/{projectId}/members/{memberId}")
-	public ProjectMembership grantMember(@PathVariable Long projectId, @PathVariable String memberId,
-			@Valid @RequestBody ProjectMemberRequest request, @RequestHeader HttpHeaders headers, Principal principal) {
-		requireMultiUserMode();
-		return projectAccessService.grant(projectId, memberId, request.accessRole(),
-				operatorResolver.resolve(headers, principal, "project-member-grant:" + projectId + ":" + memberId));
-	}
-
-	@DeleteMapping("/projects/{projectId}/members/{memberId}")
-	public void revokeMember(@PathVariable Long projectId, @PathVariable String memberId,
-			@RequestHeader HttpHeaders headers, Principal principal) {
-		requireMultiUserMode();
-		projectAccessService.revoke(projectId, memberId,
-				operatorResolver.resolve(headers, principal, "project-member-revoke:" + projectId + ":" + memberId));
-	}
-
-	private void requireMultiUserMode() {
-		if (operatorProperties.isDevelopmentMode()) {
-			throw new ResponseStatusException(HttpStatus.NOT_FOUND);
-		}
-	}
-
 	public record CreateProjectRequest(@NotBlank String projectCode, @NotBlank String name,
 			@NotBlank String businessDomain, String description,
 			@NotBlank @Pattern(regexp = "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$") String firstVersionNumber,
@@ -308,12 +259,6 @@ public class SemEvoSQLProjectController {
 	}
 
 	public record FailAnalysisRequest(@NotBlank String error) {
-	}
-
-	public record ProjectMemberRequest(@NotNull ProjectAccessRole accessRole) {
-	}
-
-	public record ProjectAccessView(Long projectId, ProjectAccessRole accessRole, boolean globalAdmin) {
 	}
 
 }

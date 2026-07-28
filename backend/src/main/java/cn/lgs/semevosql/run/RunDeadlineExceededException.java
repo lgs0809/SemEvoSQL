@@ -13,22 +13,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package cn.lgs.semevosql.common;
+package cn.lgs.semevosql.run;
 
-import lombok.Data;
-import org.springframework.boot.context.properties.ConfigurationProperties;
+import java.util.concurrent.TimeoutException;
 
-/** Security switch and JWT claim mapping for the SemEvoSQL HTTP boundary. */
-@Data
-@ConfigurationProperties(prefix = "semevosql.security")
-public class SemEvoSQLSecurityProperties {
+/** Absolute interactive Run deadline exhausted. */
+public class RunDeadlineExceededException extends IllegalStateException {
 
-	private boolean enabled = false;
-
-	private String principalClaim = "sub";
-
-	private String roleClaim = "roles";
-
-	private String authorityPrefix = "ROLE_SEMEVOSQL_";
-
+	public RunDeadlineExceededException(String message) {
+		super(message, new TimeoutException(message));
+	}
 }

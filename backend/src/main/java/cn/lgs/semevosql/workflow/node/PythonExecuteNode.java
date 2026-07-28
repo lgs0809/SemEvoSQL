@@ -111,7 +111,8 @@ public class PythonExecuteNode implements NodeAction {
 					});
 
 					PythonExecutionEffect effect = new PythonExecutionEffect(fallbackOutput, false, true);
-					runNodeEffectService.recordCompleted(runId, effectKey, effectInputHash, writeEffect(effect));
+					String attemptId = StateUtil.getStringValue(state, ATTEMPT_ID, "");
+					runNodeEffectService.recordCompleted(runId, attemptId, effectKey, effectInputHash, writeEffect(effect));
 					Flux<GraphResponse<StreamingOutput>> fallbackGenerator = FluxUtil
 						.createStreamingGeneratorWithMessages(this.getClass(), state, v -> effectState(effect),
 								fallbackDisplayFlux);
@@ -146,7 +147,8 @@ public class PythonExecuteNode implements NodeAction {
 			// Create generator using utility class, returning pre-computed business logic
 			// result
 			PythonExecutionEffect effect = new PythonExecutionEffect(finalStdout, true, false);
-			runNodeEffectService.recordCompleted(runId, effectKey, effectInputHash, writeEffect(effect));
+			String attemptId = StateUtil.getStringValue(state, ATTEMPT_ID, "");
+			runNodeEffectService.recordCompleted(runId, attemptId, effectKey, effectInputHash, writeEffect(effect));
 			Flux<GraphResponse<StreamingOutput>> generator = FluxUtil
 				.createStreamingGeneratorWithMessages(this.getClass(), state, v -> effectState(effect), displayFlux);
 

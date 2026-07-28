@@ -23,7 +23,6 @@ import org.apache.commons.lang3.BooleanUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Service;
 
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -37,7 +36,6 @@ import static cn.lgs.semevosql.util.ColumnTypeUtil.wrapType;
 /**
  * @date 2025/12/14 17:34
  */
-@Service
 public class SqlServerJdbcDdl extends AbstractJdbcDdl {
 
 	private static final Logger log = LoggerFactory.getLogger(SqlServerJdbcDdl.class);

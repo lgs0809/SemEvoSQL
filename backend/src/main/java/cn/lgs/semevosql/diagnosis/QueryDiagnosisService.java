@@ -16,10 +16,8 @@
 package cn.lgs.semevosql.diagnosis;
 
 import cn.lgs.semevosql.common.OperatorContext;
-import cn.lgs.semevosql.common.OperatorRole;
 import cn.lgs.semevosql.evolution.SemanticReplayService;
-import cn.lgs.semevosql.project.security.ProjectAccessRole;
-import cn.lgs.semevosql.project.security.ProjectAccessService;
+import cn.lgs.semevosql.project.application.ProjectScopeService;
 import cn.lgs.semevosql.run.QueryExecutionEvidence;
 import cn.lgs.semevosql.run.QueryExecutionExplanation;
 import cn.lgs.semevosql.run.QueryExecutionExplanationService;
@@ -57,7 +55,7 @@ public class QueryDiagnosisService {
 
 	private final QueryExecutionExplanationService explanationService;
 
-	private final ProjectAccessService accessService;
+	private final ProjectScopeService projectScope;
 
 	private final SemanticReplayService replayService;
 
@@ -66,17 +64,17 @@ public class QueryDiagnosisService {
 	private final ObjectMapper mapper = JsonUtil.getObjectMapper();
 
 	public QueryDiagnosisService(QueryRunService runService, QueryExecutionExplanationService explanationService,
-			ProjectAccessService accessService, SemanticReplayService replayService, JdbcTemplate jdbc) {
+			ProjectScopeService projectScope, SemanticReplayService replayService, JdbcTemplate jdbc) {
 		this.runService = runService;
 		this.explanationService = explanationService;
-		this.accessService = accessService;
+		this.projectScope = projectScope;
 		this.replayService = replayService;
 		this.jdbc = jdbc;
 	}
 
 	public DiagnosisView diagnose(String runId, OperatorContext operator) {
 		QueryRun run = runService.get(runId);
-		ProjectAccessRole projectRole = accessService.requireAccess(run.projectId(), operator, ProjectAccessRole.VIEWER);
+		projectScope.requireProject(run.projectId(), operator);
 		List<RunEvent> events = runService.events(runId, 0, 1000);
 		QueryExecutionEvidence planning = planningEvidence(events).orElse(null);
 		QueryExecutionExplanation explanation = explanationService.explain(run);
@@ -84,18 +82,15 @@ public class QueryDiagnosisService {
 		ReviewEvidence review = reviewEvidence(events).orElse(null);
 		RootCauseDecision decision = decide(run, events, planning, explanation, correction, review);
 		GovernanceView governance = governance(runId, correction);
-		boolean governedReader = operator.role().atLeast(OperatorRole.EDITOR)
-				&& projectRole.atLeast(ProjectAccessRole.EDITOR);
-		List<QueryExecutionEvidence.RetrievalCandidate> retrieval = governedReader && planning != null
+		List<QueryExecutionEvidence.RetrievalCandidate> retrieval = planning != null
 				? safe(planning.retrievalCandidates()) : List.of();
-		AdvancedEvidence advanced = operator.role() == OperatorRole.ADMIN
-				? advanced(planning, run, events) : null;
-		PipelineEvidence pipeline = governedReader ? pipeline(run, events, explanation, review) : null;
+		AdvancedEvidence advanced = advanced(planning, run, events);
+		PipelineEvidence pipeline = pipeline(run, events, explanation, review);
 		return new DiagnosisView(run.runId(), run.projectId(), run.projectVersionId(), run.threadId(),
 				explanation.understoodQuery(), run.status().name(), decision.rootCause().name(), decision.confidence().name(),
 				decision.summary(), stages(run, events, planning, explanation, review),
 				planning == null ? null : planning.selectedAssets(), retrieval, correction, governance,
-				actions(run, operator, projectRole, governance), pipeline, advanced);
+				actions(run, governance), pipeline, advanced);
 	}
 
 	private Optional<QueryExecutionEvidence> planningEvidence(List<RunEvent> events) {
@@ -296,39 +291,35 @@ public class QueryDiagnosisService {
 		}
 	}
 
-	private List<RepairAction> actions(QueryRun run, OperatorContext operator, ProjectAccessRole projectRole,
-			GovernanceView governance) {
+	private List<RepairAction> actions(QueryRun run, GovernanceView governance) {
 		List<RepairAction> actions = new ArrayList<>();
-		boolean editor = operator.role().atLeast(OperatorRole.EDITOR) && projectRole.atLeast(ProjectAccessRole.EDITOR);
 		actions.add(action("CORRECT_BINDING", "修正语义映射", "QUERY / USER 修正会立即重跑；PROJECT 修正会创建受治理的项目 Alias。",
-				"EDITOR", editor && run.terminal(), "CORRECTION"));
+				run.terminal(), "CORRECTION"));
 		actions.add(action("PROPOSE_DEFINITION", "提交语义/规划修正",
 				"指标口径、时间、过滤、关系或规划策略问题进入 Semantic Evolution，不直接修改 Published Catalog 或 Planner Prompt。",
-				"EDITOR", editor && run.terminal(), "EVOLUTION"));
+				run.terminal(), "EVOLUTION"));
 		if (governance == null) return List.copyOf(actions);
-		actions.add(action("OPEN_EVOLUTION", "完善修复 Patch", "复杂定义修正需要把用户描述落实为可审计 Semantic Patch；复用现有业务模型建议编辑器。", "EDITOR",
-				editor, "EVOLUTION"));
+		actions.add(action("OPEN_EVOLUTION", "完善修复 Patch", "复杂定义修正需要把用户描述落实为可审计 Semantic Patch。", true,
+				"EVOLUTION"));
 		String status = governance.status();
 		if ("CANDIDATE".equals(status))
 			actions.add(action("REVIEW_CANDIDATE", "审核修复建议",
 					governance.patchReady() ? "审核通过后才能创建隔离 Draft。" : "请先把用户修正描述落实为可审计 Semantic Patch。",
-					"REVIEWER", governance.patchReady() && operator.role().atLeast(OperatorRole.REVIEWER) && editor,
-					"EVOLUTION"));
+					governance.patchReady(), "EVOLUTION"));
 		if ("APPROVED".equals(status))
-			actions.add(action("CREATE_DRAFT", "创建修复草稿", "从当前正式版本 Clone Draft，并原子应用已确认 Patch。", "EDITOR",
-					editor, "EVOLUTION"));
+			actions.add(action("CREATE_DRAFT", "创建修复草稿", "从当前正式版本 Clone Draft，并原子应用已确认 Patch。", true,
+					"EVOLUTION"));
 		if ("PATCH_APPLIED".equals(status) || "REPLAY_FAILED".equals(status))
-			actions.add(action("START_REPLAY", "运行定向回归", "只跑直接受影响 Case + canonical shape 代表样本，不宣称零回归。", "EDITOR",
-					editor, "REPLAY"));
+			actions.add(action("START_REPLAY", "运行定向回归", "只跑直接受影响 Case + canonical shape 代表样本，不宣称零回归。", true,
+					"REPLAY"));
 		if ("REPLAY_PASSED".equals(status))
-			actions.add(action("READY_FOR_PUBLISH", "提交发布门禁", "Replay PASS 后由 Publisher 做独立发布决策。", "PUBLISHER",
-					operator.role().atLeast(OperatorRole.PUBLISHER) && editor, "RELEASE"));
+			actions.add(action("READY_FOR_PUBLISH", "提交发布门禁", "Replay PASS 后进入独立发布决策。", true, "RELEASE"));
 		if ("READY_FOR_PUBLISH".equals(status))
-			actions.add(action("PUBLISH_DRAFT", "发布修复版本", "发布目标 Draft；发布事件会继续完成 Candidate lineage。", "PUBLISHER",
-					operator.role().atLeast(OperatorRole.PUBLISHER) && editor, "RELEASE"));
+			actions.add(action("PUBLISH_DRAFT", "发布修复版本", "发布目标 Draft；发布事件会继续完成 Candidate lineage。", true,
+					"RELEASE"));
 		if ("PUBLISHED".equals(status) && governance.targetDraftVersionId() != null)
-			actions.add(action("ACTIVATE_DRAFT", "激活修复版本", "激活后新会话立即固定使用新的 Published Semantic Catalog。", "PUBLISHER",
-					operator.role().atLeast(OperatorRole.PUBLISHER) && editor, "RELEASE"));
+			actions.add(action("ACTIVATE_DRAFT", "激活修复版本", "激活后新会话立即固定使用新的 Published Semantic Catalog。", true,
+					"RELEASE"));
 		return List.copyOf(actions);
 	}
 
@@ -415,9 +406,8 @@ public class QueryDiagnosisService {
 		return new StageView(code, label, state.name(), summary == null ? "" : summary.trim());
 	}
 
-	private RepairAction action(String code, String label, String description, String requiredRole, boolean enabled,
-			String kind) {
-		return new RepairAction(code, label, description, requiredRole, enabled, kind);
+	private RepairAction action(String code, String label, String description, boolean enabled, String kind) {
+		return new RepairAction(code, label, description, enabled, kind);
 	}
 
 	private <T> Optional<T> read(String json, Class<T> type) {
@@ -495,8 +485,7 @@ public class QueryDiagnosisService {
 			SemanticReplayService.ImpactPreview impact, Map<String, Long> replayResultCounts) {
 	}
 
-	public record RepairAction(String code, String label, String description, String requiredRole, boolean enabled,
-			String kind) {
+	public record RepairAction(String code, String label, String description, boolean enabled, String kind) {
 	}
 
 	public record PipelineEvidence(String semanticPlanJson, String executionPlanJson, String semanticSql,

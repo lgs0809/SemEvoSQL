@@ -61,4 +61,21 @@ class QueryRunPublicPresenterTest {
 		assertThat(view.retryable()).isNull();
 	}
 
+	@Test
+	void timeoutRunKeepsAStableTimeoutCategory() {
+		QueryRun run = QueryRun.builder()
+			.runId("run-timeout")
+			.runType(QueryRun.RunType.INTERACTIVE_QUERY)
+			.status(QueryRun.RunStatus.FAILED)
+			.errorCode("INTERACTIVE_QUERY_TIMEOUT")
+			.errorMessage("internal absolute deadline details")
+			.build();
+
+		QueryRunPublicView view = presenter.present(run);
+
+		assertThat(view.errorCode()).isEqualTo("QUERY_TIMEOUT");
+		assertThat(view.errorMessage()).contains("查询执行超时").doesNotContain("internal");
+		assertThat(view.retryable()).isTrue();
+	}
+
 }

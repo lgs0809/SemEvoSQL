@@ -19,9 +19,8 @@ import cn.lgs.semevosql.clarification.ProjectSemanticAliasWorkflowService;
 import cn.lgs.semevosql.clarification.RuntimePrincipalResolver;
 import cn.lgs.semevosql.clarification.SemanticBindingScope;
 import cn.lgs.semevosql.clarification.UserSemanticPreferenceService;
-import cn.lgs.semevosql.common.OperatorAuthorizationService;
+import cn.lgs.semevosql.common.LocalOperatorService;
 import cn.lgs.semevosql.common.OperatorContext;
-import cn.lgs.semevosql.common.OperatorRole;
 import cn.lgs.semevosql.conversation.ProjectConversationService;
 import cn.lgs.semevosql.conversation.ProjectConversationService.SendMessageResult;
 import cn.lgs.semevosql.learning.QueryPatternTemplateService;
@@ -63,7 +62,7 @@ public class QueryCorrectionService {
 
 	private final ProjectConversationService conversationService;
 
-	private final OperatorAuthorizationService authorization;
+	private final LocalOperatorService authorization;
 
 	private final ObjectMapper mapper = JsonUtil.getObjectMapper();
 
@@ -71,7 +70,7 @@ public class QueryCorrectionService {
 			RuntimePrincipalResolver principalResolver, UserSemanticPreferenceService preferenceService,
 			ProjectSemanticAliasWorkflowService projectAliasWorkflowService,
 			QueryPatternTemplateService patternTemplateService, SemanticCorrectionProposalService proposalService,
-			ProjectConversationService conversationService, OperatorAuthorizationService authorization) {
+			ProjectConversationService conversationService, LocalOperatorService authorization) {
 		this.runService = runService;
 		this.catalogCache = catalogCache;
 		this.principalResolver = principalResolver;
@@ -133,10 +132,10 @@ public class QueryCorrectionService {
 		SemanticBindingScope scope = command.scope() == null ? SemanticBindingScope.QUERY : command.scope();
 		String principal = principalResolver.resolve(original);
 		if (scope == SemanticBindingScope.PROJECT) {
-			authorization.requireAtLeast(operator, OperatorRole.EDITOR, "propose PROJECT semantic binding correction");
+			authorization.require(operator, "propose PROJECT semantic binding correction");
 		}
 		else {
-			authorization.requireAtLeast(operator, OperatorRole.VIEWER, "correct own query semantic binding");
+			authorization.require(operator, "correct query semantic binding");
 			requireRunOwner(principal, operator);
 		}
 		String rawExpression = required(command.rawExpression(), "rawExpression");
@@ -181,7 +180,7 @@ public class QueryCorrectionService {
 	@Transactional
 	public SemanticCorrectionProposalService.ProposalResult proposeDefinition(Long projectId, String conversationId,
 			String runId, DefinitionCorrectionCommand command, OperatorContext operator) {
-		authorization.requireAtLeast(operator, OperatorRole.EDITOR, "propose project semantic definition correction");
+		authorization.require(operator, "propose project semantic definition correction");
 		QueryRun original = runService.get(runId);
 		if (!original.terminal() || !Objects.equals(original.projectId(), projectId)
 				|| !Objects.equals(original.threadId(), conversationId)) {
@@ -220,9 +219,6 @@ public class QueryCorrectionService {
 	private static void requireRunOwner(String principal, OperatorContext operator) {
 		if (operator == null) {
 			throw new SecurityException("A server-resolved OperatorContext is required for query correction");
-		}
-		if (operator.role() == OperatorRole.ADMIN) {
-			return;
 		}
 		if (!Objects.equals(principal, operator.operator())) {
 			throw new SecurityException("QUERY/USER semantic correction can only be changed by the Run owner");

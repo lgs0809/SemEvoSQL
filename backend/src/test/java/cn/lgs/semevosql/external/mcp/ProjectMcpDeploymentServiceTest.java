@@ -15,16 +15,13 @@
  */
 package cn.lgs.semevosql.external.mcp;
 
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import cn.lgs.semevosql.project.application.ProjectRuntimeGate;
-import cn.lgs.semevosql.project.security.ProjectAccessRole;
-import cn.lgs.semevosql.project.security.ProjectAccessService;
+import cn.lgs.semevosql.project.application.ProjectScopeService;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -32,24 +29,23 @@ class ProjectMcpDeploymentServiceTest {
 
 	private final ProjectMcpRepository repository = mock(ProjectMcpRepository.class);
 
-	private final ProjectAccessService accessService = mock(ProjectAccessService.class);
+	private final ProjectScopeService projectScope = mock(ProjectScopeService.class);
 
 	private final ProjectRuntimeGate runtimeGate = mock(ProjectRuntimeGate.class);
 
 	private final ProjectMcpProperties properties = mock(ProjectMcpProperties.class);
 
-	private final ProjectMcpDeploymentService service = new ProjectMcpDeploymentService(repository, accessService,
+	private final ProjectMcpDeploymentService service = new ProjectMcpDeploymentService(repository, projectScope,
 			runtimeGate, properties);
 
 	@Test
-	void recoversRunningDeploymentAndRestoresViewerAccess() {
+	void recoversRunningDeploymentWithoutBrowserMembershipState() {
 		ProjectMcpDeployment deployment = deployment("deployment-1", 12L, "integration:deployment-1");
 		when(repository.runningDeployments()).thenReturn(List.of(deployment));
 
 		service.recoverActiveDeployments();
 
 		verify(runtimeGate).requireReadyByProject(12L);
-		verify(accessService).grant(eq(12L), eq("integration:deployment-1"), eq(ProjectAccessRole.VIEWER), any());
 		verify(repository).updateStatus("deployment-1", ProjectMcpDeployment.Status.RUNNING);
 		verify(repository).markRecovered("deployment-1");
 		verify(repository).audit("deployment-1", 12L, "integration:deployment-1", "RECOVER", "SUCCEEDED", null);

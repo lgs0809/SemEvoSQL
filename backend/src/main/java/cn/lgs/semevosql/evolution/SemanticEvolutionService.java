@@ -15,9 +15,8 @@
  */
 package cn.lgs.semevosql.evolution;
 
-import cn.lgs.semevosql.common.OperatorAuthorizationService;
+import cn.lgs.semevosql.common.LocalOperatorService;
 import cn.lgs.semevosql.common.OperatorContext;
-import cn.lgs.semevosql.common.OperatorRole;
 import cn.lgs.semevosql.common.json.JsonPayloadRegistry;
 import cn.lgs.semevosql.common.json.VersionedJson;
 import cn.lgs.semevosql.evolution.SemanticEvolutionStateMachine.CandidateStatus;
@@ -84,7 +83,7 @@ public class SemanticEvolutionService {
 
 	private final LegacyEvolutionChangeSetBridge changeSetBridge;
 
-	private final OperatorAuthorizationService authorization;
+	private final LocalOperatorService authorization;
 
 	public List<Map<String, Object>> list(Long projectId, String status, int limit) {
 		if (StringUtils.hasText(status)) {
@@ -133,7 +132,7 @@ public class SemanticEvolutionService {
 
 	@Transactional
 	public Map<String, Object> updatePatch(String candidateId, SemanticPatch patch, OperatorContext operator) {
-		authorization.requireAtLeast(operator, OperatorRole.EDITOR, "edit Semantic Patch");
+		authorization.require(operator, "edit Semantic Patch");
 		Map<String, Object> current = lock(candidateId);
 		if (policyCandidate(current)) {
 			throw new IllegalArgumentException("Use the separate MultiSourcePolicyPatch endpoint for this candidate");
@@ -175,7 +174,7 @@ public class SemanticEvolutionService {
 	@Transactional
 	public Map<String, Object> updatePolicyPatch(String candidateId, MultiSourcePolicyPatch patch,
 			OperatorContext operator) {
-		authorization.requireAtLeast(operator, OperatorRole.EDITOR, "edit Multi-Source Policy Patch");
+		authorization.require(operator, "edit Multi-Source Policy Patch");
 		Map<String, Object> current = lock(candidateId);
 		if (!policyCandidate(current)) {
 			throw new IllegalArgumentException("Candidate does not use the MultiSourcePolicyPatch DSL");
@@ -213,7 +212,7 @@ public class SemanticEvolutionService {
 
 	@Transactional
 	public Map<String, Object> review(String candidateId, ReviewCommand command, OperatorContext operator) {
-		authorization.requireAtLeast(operator, OperatorRole.REVIEWER, "review Semantic Evolution Candidate");
+		authorization.require(operator, "review Semantic Evolution Candidate");
 		Map<String, Object> current = lock(candidateId);
 		if (replayed(candidateId, "CANDIDATE_REVIEWED", operator, command)) {
 			return get(candidateId);
@@ -250,7 +249,7 @@ public class SemanticEvolutionService {
 
 	@Transactional
 	public Map<String, Object> createDraft(String candidateId, DraftCommand command, OperatorContext operator) {
-		authorization.requireAtLeast(operator, OperatorRole.EDITOR, "create Semantic Evolution draft");
+		authorization.require(operator, "create Semantic Evolution draft");
 		Map<String, Object> current = lock(candidateId);
 		assertNotTrueAmbiguity(current);
 		if (replayed(candidateId, "DRAFT_CREATED", operator, command)) {
@@ -320,7 +319,7 @@ public class SemanticEvolutionService {
 	}
 
 	public SemanticReplayCoordinator.ReplayRunView startReplay(String candidateId, OperatorContext operator) {
-		authorization.requireAtLeast(operator, OperatorRole.EDITOR, "start Semantic Replay");
+		authorization.require(operator, "start Semantic Replay");
 		return replayCoordinator.start(candidateId, operator);
 	}
 
@@ -352,7 +351,7 @@ public class SemanticEvolutionService {
 	}
 
 	public Map<String, Object> markReadyForPublish(String candidateId, OperatorContext operator) {
-		authorization.requireAtLeast(operator, OperatorRole.PUBLISHER, "approve Candidate for publication");
+		authorization.require(operator, "approve Candidate for publication");
 		Map<String, Object> current = candidate(candidateId);
 		if (replayed(candidateId, "READY_FOR_PUBLISH", operator, Map.of())) {
 			return get(candidateId);
@@ -421,7 +420,7 @@ public class SemanticEvolutionService {
 	 * Normal publication never requires this call.
 	 */
 	public Map<String, Object> acknowledgePublished(String candidateId, OperatorContext operator) {
-		authorization.requireAtLeast(operator, OperatorRole.PUBLISHER, "retry Semantic Evolution publication");
+		authorization.require(operator, "retry Semantic Evolution publication");
 		Map<String, Object> current = candidate(candidateId);
 		Long draftVersionId = number(current.get("target_draft_version_id"));
 		Map<String, Object> draft = version(draftVersionId);
@@ -658,7 +657,7 @@ public class SemanticEvolutionService {
 	}
 
 	private OperatorContext withKey(OperatorContext operator, String idempotencyKey) {
-		return new OperatorContext(operator.operator(), operator.role(), operator.source(), operator.requestId(),
+		return new OperatorContext(operator.operator(), operator.source(), operator.requestId(),
 				idempotencyKey);
 	}
 

@@ -27,6 +27,7 @@ import cn.lgs.semevosql.semantic.application.SemanticBlueprintGenerationService;
 import cn.lgs.semevosql.semantic.application.SemanticCatalogApplicationService;
 import cn.lgs.semevosql.semantic.compiler.CompiledSemanticQuery;
 import cn.lgs.semevosql.semantic.compiler.SemanticSqlCompiler;
+import cn.lgs.semevosql.semantic.compiler.LoweringCapabilityProbe;
 import cn.lgs.semevosql.semantic.compiler.SqlDialect;
 import cn.lgs.semevosql.semantic.domain.SemanticCatalogRepository;
 import cn.lgs.semevosql.semantic.domain.SemanticCatalogSnapshot;
@@ -334,6 +335,9 @@ public class SemanticReplayService {
 					: planComparator.hints(sourcePlan, caseId);
 			targetPlan = buildBlueprintForReplay(projectId, targetVersionId, targetCatalog,
 					text(queryCase.get("normalized_question")), tables, replayHints);
+			if (!planningPolicyReplay) {
+				planComparator.preserveComputationIntent(sourcePlan, targetPlan);
+			}
 		}
 		catch (RuntimeException ex) {
 			persist(candidateId, targetVersionId, caseId, "IR", "FAILED", planComparator.planShape(sourcePlan), Map.of(),
@@ -348,9 +352,17 @@ public class SemanticReplayService {
 		if (!irErrors.isEmpty()) {
 			return CaseReplay.failed(caseId, "IR", String.join("; ", irErrors));
 		}
-		if (!"DETERMINISTIC".equalsIgnoreCase(targetPlan.getCompilerMode())) {
+		LoweringCapabilityProbe.Decision lowering = LoweringCapabilityProbe.probe(targetPlan, targetCatalog,
+				dialects(targetPlan));
+		if (lowering.status() == LoweringCapabilityProbe.Status.INVALID) {
+			persist(candidateId, targetVersionId, caseId, "SQL", "FAILED", Map.of(),
+					Map.of("loweringStatus", lowering.status().name(), "reason", lowering.reason()), lowering.reason());
+			return CaseReplay.failed(caseId, "SQL", lowering.reason());
+		}
+		if (lowering.status() == LoweringCapabilityProbe.Status.REQUIRES_GENERATION) {
 			persist(candidateId, targetVersionId, caseId, "SQL", "REVIEW_REQUIRED",
-					Map.of("compilerMode", targetPlan.getCompilerMode()), Map.of(), null);
+					Map.of("compilerMode", targetPlan.getCompilerMode()),
+					Map.of("loweringStatus", lowering.status().name(), "reason", lowering.reason()), null);
 			return CaseReplay.reviewRequired(caseId);
 		}
 		try {

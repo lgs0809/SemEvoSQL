@@ -15,6 +15,7 @@
  */
 package cn.lgs.semevosql.workflow.node;
 
+import static cn.lgs.semevosql.constant.Constant.ATTEMPT_ID;
 import static cn.lgs.semevosql.constant.Constant.ADVANCED_EXECUTION_FALLBACK;
 import static cn.lgs.semevosql.constant.Constant.FORCE_SEMANTIC_REPLAN;
 import static cn.lgs.semevosql.constant.Constant.LAST_SQL_EXECUTED_STEP;
@@ -180,7 +181,8 @@ public class PostExecutionReviewNode implements NodeAction {
 			updatedBudget = transition.budget();
 		}
 		PostReviewEffect effect = new PostReviewEffect(review, updatedBudget, step, resultPayload, sql);
-		runNodeEffectService.recordCompleted(runId, effectKey, inputHash, writeEffect(effect));
+		String attemptId = StateUtil.getStringValue(state, ATTEMPT_ID, "");
+		runNodeEffectService.recordCompleted(runId, attemptId, effectKey, inputHash, writeEffect(effect));
 		recordEvidence(runId, step, plan, executionPlan, review, updatedBudget, inputHash);
 		return applyEffect(state, effect, false);
 	}

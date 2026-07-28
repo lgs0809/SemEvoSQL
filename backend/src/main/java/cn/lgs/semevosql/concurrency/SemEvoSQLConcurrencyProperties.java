@@ -22,8 +22,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "semevosql.concurrency")
 public class SemEvoSQLConcurrencyProperties {
 
-	// Keep the outer durable Graph timeout above the model gateway's 120s total timeout so the model call gets the first chance to unwind.
-	private Pool interactiveQuery = Pool.of(20, 100, 5000, 150000);
+	// One absolute deadline covers the whole governed Graph. Semantic planning consumes a shared
+	// sub-budget and terminal attempt fencing rejects any result that returns after this deadline.
+	private Pool interactiveQuery = Pool.of(20, 100, 5000, 300000);
 
 	private Pool initialization = Pool.of(4, 20, 10000, 600000);
 

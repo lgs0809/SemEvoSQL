@@ -15,9 +15,8 @@
  */
 package cn.lgs.semevosql.project.application;
 
-import cn.lgs.semevosql.common.OperatorAuthorizationService;
+import cn.lgs.semevosql.common.LocalOperatorService;
 import cn.lgs.semevosql.common.OperatorContext;
-import cn.lgs.semevosql.common.OperatorRole;
 import cn.lgs.semevosql.project.domain.ProjectDatasourceBinding;
 import cn.lgs.semevosql.project.domain.ProjectVersionStatus;
 import cn.lgs.semevosql.project.domain.SemanticProjectRepository;
@@ -38,7 +37,7 @@ public class ProjectDatasourceBindingService {
 
 	private final DatasourceService datasourceService;
 
-	private final OperatorAuthorizationService authorization;
+	private final LocalOperatorService authorization;
 
 	public List<ProjectDatasourceBinding> listBindings(Long projectId, Long versionId) {
 		requireVersion(projectId, versionId);
@@ -49,7 +48,7 @@ public class ProjectDatasourceBindingService {
 	public ProjectDatasourceBinding saveBinding(Long projectId, Long versionId, Integer datasourceId, String domainCode,
 			String domainName, String responsibility, Integer priority, List<String> exposedTables,
 			OperatorContext operator) {
-		authorization.requireAtLeast(operator, OperatorRole.EDITOR, "edit Project datasource binding");
+		authorization.require(operator, "edit Project datasource binding");
 		SemanticProjectVersion version = requireMutableDraft(projectId, versionId);
 		if (datasourceService.getDatasourceById(datasourceId) == null) {
 			throw new IllegalArgumentException("Datasource not found: " + datasourceId);
@@ -63,7 +62,7 @@ public class ProjectDatasourceBindingService {
 
 	@Transactional
 	public void deleteBinding(Long projectId, Long versionId, Integer datasourceId, OperatorContext operator) {
-		authorization.requireAtLeast(operator, OperatorRole.EDITOR, "delete Project datasource binding");
+		authorization.require(operator, "delete Project datasource binding");
 		requireMutableDraft(projectId, versionId);
 		repository.deleteDatasourceBinding(versionId, datasourceId);
 	}
@@ -71,7 +70,7 @@ public class ProjectDatasourceBindingService {
 	@Transactional
 	public void saveBindings(Long projectId, Long versionId, List<BindingDefinition> definitions,
 			OperatorContext operator) {
-		authorization.requireAtLeast(operator, OperatorRole.EDITOR, "edit Project datasource bindings");
+		authorization.require(operator, "edit Project datasource bindings");
 		if (definitions == null) {
 			return;
 		}
@@ -93,7 +92,7 @@ public class ProjectDatasourceBindingService {
 
 	@Transactional
 	public void cloneBindings(Long projectId, Long sourceVersionId, Long targetVersionId, OperatorContext operator) {
-		authorization.requireAtLeast(operator, OperatorRole.EDITOR, "clone Project datasource bindings");
+		authorization.require(operator, "clone Project datasource bindings");
 		requireVersion(projectId, sourceVersionId);
 		requireMutableDraft(projectId, targetVersionId);
 		for (ProjectDatasourceBinding binding : repository.findDatasourceBindings(sourceVersionId)) {

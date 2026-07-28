@@ -19,12 +19,10 @@ import cn.lgs.semevosql.connector.ddl.DdlFactory;
 import cn.lgs.semevosql.connector.accessor.AbstractAccessor;
 import cn.lgs.semevosql.connector.pool.DBConnectionPoolFactory;
 import cn.lgs.semevosql.enums.BizDataSourceTypeEnum;
-import org.springframework.stereotype.Service;
 
 /**
  */
 
-@Service("h2Accessor")
 public class H2DBAccessor extends AbstractAccessor {
 
 	private final static String ACCESSOR_TYPE = "H2_Accessor";

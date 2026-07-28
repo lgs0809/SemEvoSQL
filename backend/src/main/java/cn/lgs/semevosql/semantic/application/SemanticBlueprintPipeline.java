@@ -104,8 +104,11 @@ public class SemanticBlueprintPipeline {
 		long exampleRecallMs = elapsedMillis(examplesStarted);
 
 		long bindingStarted = System.nanoTime();
-		PlanningDecision planningDecision = llmPlanningService.planDecision(request.query(), candidates, recall.hits(),
-				historicalHints, request.requiredHints(), PlannerProfile.CONFIGURED);
+		PlanningDecision planningDecision = request.runDeadlineEpochMillis() == null
+				? llmPlanningService.planDecision(request.query(), candidates, recall.hits(), historicalHints,
+						request.requiredHints(), PlannerProfile.CONFIGURED)
+				: llmPlanningService.planDecision(request.query(), candidates, recall.hits(), historicalHints,
+						request.requiredHints(), PlannerProfile.CONFIGURED, request.runDeadlineEpochMillis());
 		if (planningDecision == null) {
 			SemanticPlanningOutcome compatibilityOutcome = llmPlanningService.planOutcome(request.query(), candidates,
 					recall.hits(), historicalHints, request.requiredHints());
@@ -139,11 +142,16 @@ public class SemanticBlueprintPipeline {
 			resolutionError = resolutionFailureMessage(resolutionFailure.getMessage());
 		}
 		if (StringUtils.hasText(resolutionError)) {
-			PlanningDecision repairDecision = llmPlanningService.repairAfterResolutionFailure(request.query(), candidates,
-					recall.hits(), historicalHints, request.requiredHints(), PlannerProfile.CONFIGURED, resolutionError);
+			PlanningDecision repairDecision = planningDecision.planningSession() == null
+					? llmPlanningService.repairAfterResolutionFailure(request.query(), candidates, recall.hits(), historicalHints,
+							request.requiredHints(), PlannerProfile.CONFIGURED, resolutionError)
+					: llmPlanningService.repairAfterResolutionFailure(request.query(), candidates, recall.hits(), historicalHints,
+							request.requiredHints(), PlannerProfile.CONFIGURED, resolutionError,
+							planningDecision.planningSession());
 			List<ModelCallResult> combinedCalls = new ArrayList<>(planningDecision.modelCalls());
 			combinedCalls.addAll(repairDecision.modelCalls());
-			planningDecision = new PlanningDecision(repairDecision.outcome(), List.copyOf(combinedCalls));
+			planningDecision = new PlanningDecision(repairDecision.outcome(), List.copyOf(combinedCalls),
+					repairDecision.planningSession());
 			SemanticPlanningOutcome repairedOutcome = repairDecision.outcome();
 			if (repairedOutcome instanceof SemanticPlanningOutcome.ClarificationRequired clarification) {
 				throw new SemanticPlanningClarificationRequiredException(clarification);
@@ -228,12 +236,19 @@ public class SemanticBlueprintPipeline {
 
 	public record PlanningRequest(Long projectId, Long projectVersionId, String catalogHash, String query,
 			String contextHash, Collection<String> additionalPhysicalTables, QueryCaseHints requiredHints, int recallLimit,
-			int exampleLimit, String retrievalQuery, String principalId) {
+			int exampleLimit, String retrievalQuery, String principalId, Long runDeadlineEpochMillis) {
 		public PlanningRequest(Long projectId, Long projectVersionId, String catalogHash, String query,
 				String contextHash, Collection<String> additionalPhysicalTables, QueryCaseHints requiredHints, int recallLimit,
 				int exampleLimit) {
 			this(projectId, projectVersionId, catalogHash, query, contextHash, additionalPhysicalTables, requiredHints,
-					recallLimit, exampleLimit, null, null);
+					recallLimit, exampleLimit, null, null, null);
+		}
+
+		public PlanningRequest(Long projectId, Long projectVersionId, String catalogHash, String query,
+				String contextHash, Collection<String> additionalPhysicalTables, QueryCaseHints requiredHints, int recallLimit,
+				int exampleLimit, String retrievalQuery, String principalId) {
+			this(projectId, projectVersionId, catalogHash, query, contextHash, additionalPhysicalTables, requiredHints,
+					recallLimit, exampleLimit, retrievalQuery, principalId, null);
 		}
 
 		public PlanningRequest(Long projectId, Long projectVersionId, String catalogHash, String query,

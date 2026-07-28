@@ -22,6 +22,7 @@ import cn.lgs.semevosql.learning.QueryCaseHints;
 import cn.lgs.semevosql.multisource.MultiSourcePolicySnapshot.CrossSourceRelationship;
 import cn.lgs.semevosql.semantic.domain.ComputationIntent;
 import cn.lgs.semevosql.semantic.domain.ComputationIntent.Capability;
+import cn.lgs.semevosql.util.JsonUtil;
 import cn.lgs.semevosql.semantic.domain.RelationshipCardinality;
 import cn.lgs.semevosql.semantic.domain.SemanticAssetStatus;
 import cn.lgs.semevosql.semantic.domain.SemanticCandidateSet;
@@ -94,6 +95,65 @@ class SemanticBlueprintGenerationServiceTest {
 				"ratio=order_count/golden_order_count", Set.of("order_count", "golden_order_count")))
 			.isInstanceOf(IllegalArgumentException.class)
 			.hasMessageContaining("only one binary + or - expression");
+	}
+
+	@Test
+	void computationRequirementsPreserveTopNAndPeriodComparisonSemanticsWithoutSqlStructure() throws Exception {
+		var mapper = JsonUtil.getObjectMapper();
+		ComputationIntent intent = SemanticBlueprintGenerationService.computationIntent(
+				mapper.readTree("[\"AGGREGATION\",\"PERIOD_COMPARISON\",\"ORDERING\",\"LIMIT\"]"),
+				mapper.readTree("""
+						[
+						  {"capability":"PERIOD_COMPARISON","metricCode":"paid_amount","grain":"month","mode":"previous_period_rate"},
+						  {"capability":"ORDERING","mode":"highest","basis":"period_comparison"},
+						  {"capability":"LIMIT","limit":3,"scope":"global","basis":"ordering"}
+						]
+						"""), Set.of("paid_amount"));
+
+		assertThat(intent.capabilities()).contains(Capability.AGGREGATION, Capability.PERIOD_COMPARISON, Capability.ORDERING,
+				Capability.LIMIT);
+		assertThat(intent.requirements()).hasSize(3);
+		assertThat(intent.requirements().get(0).grain()).isEqualTo("MONTH");
+		assertThat(intent.requirements().get(0).mode()).isEqualTo("PREVIOUS_PERIOD_RATE");
+		assertThat(intent.requirements().get(1).mode()).isEqualTo("HIGHEST");
+		assertThat(intent.requirements().get(1).basis()).isEqualTo("PERIOD_COMPARISON");
+		assertThat(intent.requirements().get(2).limit()).isEqualTo(3);
+		assertThat(intent.requirements().get(2).basis()).isEqualTo("ORDERING");
+	}
+
+	@Test
+	void computationIntentRemainsBackwardCompatibleWithCapabilityOnlySnapshots() throws Exception {
+		ComputationIntent restored = JsonUtil.getObjectMapper()
+			.readValue("{\"capabilities\":[\"AGGREGATION\"]}", ComputationIntent.class);
+
+		assertThat(restored.capabilities()).containsExactly(Capability.AGGREGATION);
+		assertThat(restored.requirements()).isEmpty();
+	}
+
+	@Test
+	void computationRequirementRejectsMetricOutsideCurrentSemanticSelection() throws Exception {
+		var mapper = JsonUtil.getObjectMapper();
+		assertThatThrownBy(() -> SemanticBlueprintGenerationService.computationIntent(mapper.readTree("[]"),
+				mapper.readTree("[{\"capability\":\"PERIOD_COMPARISON\",\"metricCode\":\"refund_amount\"}]"),
+				Set.of("paid_amount"))).isInstanceOf(IllegalArgumentException.class)
+				.hasMessageContaining("metricCode must be selected");
+	}
+
+	@Test
+	void computationRequirementRejectsInvalidLimitAndSqlLikeSemanticTokens() throws Exception {
+		var mapper = JsonUtil.getObjectMapper();
+		assertThatThrownBy(() -> SemanticBlueprintGenerationService.computationIntent(mapper.readTree("[]"),
+				mapper.readTree("[{\"capability\":\"LIMIT\",\"limit\":0}]"), Set.of("paid_amount")))
+				.isInstanceOf(IllegalArgumentException.class)
+				.hasMessageContaining("between 1 and 10000");
+		assertThatThrownBy(() -> SemanticBlueprintGenerationService.computationIntent(mapper.readTree("[]"),
+				mapper.readTree("[{\"capability\":\"LIMIT\",\"limit\":3.5}]"), Set.of("paid_amount")))
+				.isInstanceOf(IllegalArgumentException.class)
+				.hasMessageContaining("must be an integer");
+		assertThatThrownBy(() -> SemanticBlueprintGenerationService.computationIntent(mapper.readTree("[]"),
+				mapper.readTree("[{\"capability\":\"PERIOD_COMPARISON\",\"mode\":\"LAG(paid_amount) OVER\"}]"),
+				Set.of("paid_amount"))).isInstanceOf(IllegalArgumentException.class)
+				.hasMessageContaining("must be a semantic token");
 	}
 
 	@Test

@@ -16,7 +16,6 @@
 package cn.lgs.semevosql.evolution;
 
 import cn.lgs.semevosql.common.OperatorContext;
-import cn.lgs.semevosql.common.OperatorRole;
 import cn.lgs.semevosql.evolution.SemanticEvolutionStateMachine.CandidateStatus;
 import cn.lgs.semevosql.evolution.SemanticEvolutionStateMachine.Mutation;
 import cn.lgs.semevosql.learning.ValidatedQueryExampleService;
@@ -87,7 +86,7 @@ public class SemanticEvolutionPublicationListener {
 		else if ("SUCCEEDED".equals(text(candidate.get("rebind_status")))) {
 			return;
 		}
-		OperatorContext operator = new OperatorContext("semevosql-system", OperatorRole.ADMIN, "AFTER_COMMIT_EVENT",
+		OperatorContext operator = new OperatorContext("semevosql-system", "AFTER_COMMIT_EVENT",
 				"version-published:" + event.versionId(), "version-published:" + candidateId + ":" + event.versionId());
 		auditService.append(candidateId, "VERSION_PUBLISHED", text(candidate.get("status")), "PUBLISHED", operator,
 				number(candidate.get("source_version_id")), event.versionId(), text(candidate.get("patch_hash")), null,
@@ -102,7 +101,7 @@ public class SemanticEvolutionPublicationListener {
 					WHERE id = ?
 					""", candidateId);
 			auditService.append(candidateId, "QUERY_CASE_REBIND_COMPLETED", "PUBLISHED", "PUBLISHED",
-					new OperatorContext(operator.operator(), operator.role(), operator.source(), operator.requestId(),
+					new OperatorContext(operator.operator(), operator.source(), operator.requestId(),
 							operator.idempotencyKey() + ":rebind"),
 					number(candidate.get("source_version_id")), event.versionId(), text(candidate.get("patch_hash")),
 					null, event, report);
@@ -116,7 +115,7 @@ public class SemanticEvolutionPublicationListener {
 					WHERE id = ?
 					""", message(ex), candidateId);
 			auditService.append(candidateId, "QUERY_CASE_REBIND_FAILED", "PUBLISHED", "PUBLISHED",
-					new OperatorContext(operator.operator(), operator.role(), operator.source(), operator.requestId(),
+					new OperatorContext(operator.operator(), operator.source(), operator.requestId(),
 							operator.idempotencyKey() + ":rebind-failed"),
 					number(candidate.get("source_version_id")), event.versionId(), text(candidate.get("patch_hash")),
 					null, event, Map.of("error", message(ex)));

@@ -22,7 +22,7 @@ import cn.lgs.semevosql.multisource.MultiSourceRunService.SourceSubRun;
 import cn.lgs.semevosql.multisource.MultiSourceRunService.SourceSubRunStatus;
 import cn.lgs.semevosql.multisource.MultiSourceSqlExecutionService;
 import cn.lgs.semevosql.operations.SemanticCatalogCache;
-import cn.lgs.semevosql.run.QueryRunService;
+import cn.lgs.semevosql.run.RunExecutionFenceService;
 import cn.lgs.semevosql.semantic.compiler.CompiledSemanticQuery;
 import cn.lgs.semevosql.semantic.compiler.CompiledSemanticQuery.CompiledSourceQuery;
 import cn.lgs.semevosql.semantic.compiler.SemanticSqlCompiler;
@@ -56,10 +56,10 @@ public class VerifiedQueryExecutionService {
 	private final MultiSourceSqlExecutionService sqlExecutionService;
 	private final MultiSourceRunService multiSourceRunService;
 
-	private final QueryRunService queryRunService;
+	private final RunExecutionFenceService executionFence;
 
-	public ExecutionResult execute(String runId, String executionKey, Long projectId, Long versionId, String principalId,
-			SemanticBlueprint plan) throws Exception {
+	public ExecutionResult execute(String runId, String attemptId, String executionKey, Long projectId, Long versionId,
+			String principalId, SemanticBlueprint plan) throws Exception {
 		if (plan == null || !plan.isExecutable()) {
 			throw new IllegalArgumentException("An executable Semantic Blueprint is required");
 		}
@@ -70,13 +70,14 @@ public class VerifiedQueryExecutionService {
 					LinkedHashMap::new));
 		CompiledSemanticQuery compiled = semanticSqlCompiler.compile(plan, semanticCatalogCache.get(projectId, versionId),
 				dialects, Clock.systemUTC(), ZoneId.systemDefault());
-		String attemptId = Objects.toString(queryRunService.get(runId).attemptId(), "");
+		executionFence.assertActive(runId, attemptId);
 		multiSourceRunService.initialize(runId, executionKey, projectId, versionId, plan);
 		Map<Integer, CompiledSourceQuery> compiledByDatasource = compiled.sources().stream()
 			.collect(Collectors.toMap(CompiledSourceQuery::datasourceId, source -> source, (left, right) -> left,
 					LinkedHashMap::new));
 
 		for (SemanticBlueprint.SourceSubPlan sourcePlan : plan.getSourceSubPlans()) {
+			executionFence.assertActive(runId, attemptId);
 			CompiledSourceQuery sourceQuery = compiledByDatasource.get(sourcePlan.getDatasourceId());
 			if (sourceQuery == null) {
 				throw new IllegalStateException("Compiled query missing datasource " + sourcePlan.getDatasourceId());
@@ -100,16 +101,19 @@ public class VerifiedQueryExecutionService {
 						sourcePlan.getDatasourceId(), Set.copyOf(sourcePlan.getPhysicalTables()), sourceQuery.sql(),
 						sourceQuery.parameters(), sourceSemanticPlan, attemptId,
 						"semantic-source:" + executionKey + ":" + sourceRun.subRunId());
+				executionFence.assertActive(runId, attemptId);
 				protectInternalMergeKey(result, plan, sourcePlan);
 				String freshness = freshness(plan, sourcePlan, executionOwner, projectId);
 				multiSourceRunService.completeSource(runId, sourceRun.subRunId(), sourceQuery.sql(), result, freshness);
 			}
 			catch (Exception failure) {
+				executionFence.assertActive(runId, attemptId);
 				multiSourceRunService.failSource(runId, sourceRun.subRunId(), failure.getMessage());
 				throw failure;
 			}
 		}
 
+		executionFence.assertActive(runId, attemptId);
 		ResultArtifact artifact = multiSourceRunService.merge(runId, executionKey, plan);
 		ResultSetBO merged = multiSourceRunService.resultSet(artifact);
 		String allSql = compiled.sources().stream().map(CompiledSourceQuery::sql)

@@ -26,7 +26,6 @@ import cn.lgs.semevosql.enums.BizDataSourceTypeEnum;
 import java.util.ArrayList;
 import org.apache.commons.lang3.BooleanUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.springframework.stereotype.Service;
 
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -36,7 +35,6 @@ import java.util.stream.Collectors;
 
 import static cn.lgs.semevosql.util.ColumnTypeUtil.wrapType;
 
-@Service
 public class H2JdbcDdl extends AbstractJdbcDdl {
 
 @Override

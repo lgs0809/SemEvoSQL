@@ -15,24 +15,35 @@
  */
 package cn.lgs.semevosql.semantic.domain;
 
+import java.util.Comparator;
 import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Objects;
 import java.util.Set;
 
 /**
  * A deliberately thin description of the computation the answer requires.
  *
- * <p>This is not a SQL AST or executable DSL. It describes required capabilities only;
- * the deterministic SQL generator or constrained Semantic SQL generator remains free to
- * choose the physical SQL structure.</p>
+ * <p>This is not a SQL AST or executable DSL. It describes required capabilities and small semantic parameters only;
+ * the deterministic SQL generator or constrained Semantic SQL generator remains free to choose the physical SQL
+ * structure.</p>
  */
-public record ComputationIntent(Set<Capability> capabilities) {
+public record ComputationIntent(Set<Capability> capabilities, List<Requirement> requirements) {
 
 	public ComputationIntent {
-		capabilities = Set.copyOf(capabilities == null ? Set.of() : new LinkedHashSet<>(capabilities));
+		requirements = List.copyOf(new LinkedHashSet<>(requirements == null ? List.of() : requirements));
+		LinkedHashSet<Capability> normalizedCapabilities = new LinkedHashSet<>(capabilities == null ? Set.of() : capabilities);
+		requirements.stream().map(Requirement::capability).forEach(normalizedCapabilities::add);
+		capabilities = Set.copyOf(normalizedCapabilities);
+	}
+
+	public ComputationIntent(Set<Capability> capabilities) {
+		this(capabilities, List.of());
 	}
 
 	public static ComputationIntent empty() {
-		return new ComputationIntent(Set.of());
+		return new ComputationIntent(Set.of(), List.of());
 	}
 
 	public boolean requires(Capability capability) {
@@ -41,6 +52,50 @@ public record ComputationIntent(Set<Capability> capabilities) {
 
 	public boolean requiresExplicitTimeAxis() {
 		return capabilities.stream().anyMatch(Capability::requiresExplicitTimeAxis);
+	}
+
+	public List<Requirement> canonicalRequirements() {
+		return requirements.stream()
+			.sorted(Comparator.comparing((Requirement value) -> value.capability().name())
+				.thenComparing(value -> Objects.toString(value.metricCode(), ""))
+				.thenComparing(value -> Objects.toString(value.grain(), ""))
+				.thenComparing(value -> Objects.toString(value.mode(), ""))
+				.thenComparing(value -> value.limit() == null ? -1 : value.limit())
+				.thenComparing(value -> Objects.toString(value.scope(), ""))
+				.thenComparing(value -> Objects.toString(value.basis(), "")))
+			.toList();
+	}
+
+	/** Thin non-executable parameters that refine WHAT must be computed, never SQL structure. */
+	public record Requirement(Capability capability, String metricCode, String grain, String mode, Integer limit,
+			String scope, String basis) {
+
+		public Requirement {
+			if (capability == null) {
+				throw new IllegalArgumentException("Computation requirement capability is required");
+			}
+			metricCode = trim(metricCode);
+			grain = upper(grain);
+			mode = upper(mode);
+			scope = upper(scope);
+			basis = upper(basis);
+			if (limit != null && limit <= 0) {
+				throw new IllegalArgumentException("Computation requirement limit must be positive");
+			}
+		}
+
+		private static String trim(String value) {
+			if (value == null) {
+				return null;
+			}
+			String normalized = value.trim();
+			return normalized.isEmpty() ? null : normalized;
+		}
+
+		private static String upper(String value) {
+			String normalized = trim(value);
+			return normalized == null ? null : normalized.toUpperCase(Locale.ROOT);
+		}
 	}
 
 	public enum Capability {

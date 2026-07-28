@@ -50,6 +50,8 @@ public class SemanticPatchValidator {
 
 	private static final Pattern ASSET_KEY = Pattern.compile("[A-Za-z0-9_.$:-]{1,500}");
 
+	private static final Pattern PROJECT_ALIAS_KEY = Pattern.compile("[\\p{L}\\p{N}_]{1,500}");
+
 	private static final Pattern QUALIFIED_COLUMN = Pattern
 		.compile("\\b([A-Za-z_][A-Za-z0-9_]*)\\.([A-Za-z_][A-Za-z0-9_]*)\\b");
 
@@ -188,9 +190,11 @@ public class SemanticPatchValidator {
 				violations.add(error("ASSET_TYPE_MISMATCH", path + ".assetType",
 						"Operation " + operation.operation() + " requires assetType " + rule.assetType()));
 			}
-			if (!ASSET_KEY.matcher(operation.assetKey()).matches()) {
+			if (!validAssetKey(operation)) {
 				violations.add(error("INVALID_ASSET_KEY", path + ".assetKey",
-						"assetKey must use stable code characters and be at most 500 characters"));
+						operation.operation() == OperationType.ADD_PROJECT_ALIAS
+								? "Project Alias assetKey must be a normalized natural-language phrase of at most 500 characters"
+								: "assetKey must use stable code characters and be at most 500 characters"));
 			}
 			boolean add = operation.operation().name().startsWith("ADD_")
 					&& operation.operation() != OperationType.ADD_COLUMN_SYNONYM
@@ -233,6 +237,10 @@ public class SemanticPatchValidator {
 
 	private void validateReferences(Operation operation, String path, SemanticCatalogSnapshot catalog,
 			Set<String> models, Map<String, Set<String>> columns, List<Violation> violations) {
+		if (operation.operation() == OperationType.ADD_PROJECT_ALIAS && !validProjectAliasTarget(operation)) {
+			violations.add(error("INVALID_TARGET_ASSET_KEY", path + ".values.targetAssetKey",
+					"Project Alias targetAssetKey must use stable code characters and be at most 500 characters"));
+		}
 		String model = value(operation, "modelCode");
 		if (StringUtils.hasText(model) && !models.contains(model)) {
 			violations.add(error("MODEL_NOT_FOUND", path + ".values.modelCode", "Referenced model does not exist"));
@@ -295,6 +303,19 @@ public class SemanticPatchValidator {
 				}
 			}
 		}
+	}
+
+	boolean validAssetKey(Operation operation) {
+		if (operation == null || operation.assetKey() == null) {
+			return false;
+		}
+		Pattern pattern = operation.operation() == OperationType.ADD_PROJECT_ALIAS ? PROJECT_ALIAS_KEY : ASSET_KEY;
+		return pattern.matcher(operation.assetKey()).matches();
+	}
+
+	boolean validProjectAliasTarget(Operation operation) {
+		return operation != null && operation.operation() == OperationType.ADD_PROJECT_ALIAS
+				&& ASSET_KEY.matcher(value(operation, "targetAssetKey")).matches();
 	}
 
 	private void validateCurrentFingerprint(Operation operation, String path, SemanticCatalogSnapshot catalog,

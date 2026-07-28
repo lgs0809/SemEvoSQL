@@ -18,7 +18,9 @@ package cn.lgs.semevosql.semantic.compiler;
 import cn.lgs.semevosql.semantic.domain.ComputationIntent;
 import cn.lgs.semevosql.semantic.domain.ComputationIntent.Capability;
 import cn.lgs.semevosql.semantic.domain.SemanticBlueprint;
+import cn.lgs.semevosql.semantic.domain.SemanticCatalogSnapshot;
 import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.springframework.util.StringUtils;
@@ -34,6 +36,7 @@ public final class LoweringCapabilityProbe {
 	private LoweringCapabilityProbe() {
 	}
 
+	/** Intent-only probe retained for planning, metrics and backwards-compatible tests. */
 	public static Decision probe(SemanticBlueprint plan) {
 		if (plan == null) {
 			return Decision.invalid("Semantic Blueprint is required");
@@ -54,6 +57,102 @@ public final class LoweringCapabilityProbe {
 					"Semantic Blueprint has no complete governed deterministic projection");
 		}
 		return Decision.supported(required);
+	}
+
+	/**
+	 * Execution-time probe. In addition to computation intent, this validates the current Catalog and dialect
+	 * context so a SUPPORTED decision means the fast path is actually lowerable in the active environment.
+	 */
+	public static Decision probe(SemanticBlueprint plan, SemanticCatalogSnapshot catalog,
+			Map<Integer, SqlDialect> dialects) {
+		Decision intent = probe(plan);
+		if (intent.status() != Status.SUPPORTED) {
+			return intent;
+		}
+		if (catalog == null) {
+			return Decision.invalid("Semantic Catalog is required for deterministic lowering");
+		}
+		if (plan.getProjections() == null || plan.getProjections().isEmpty()) {
+			return Decision.requiresGeneration(intent.requiredCapabilities(), Set.of(),
+					"No governed projection is available for deterministic SQL");
+		}
+
+		Set<String> enabledModels = catalog.getModels().stream()
+			.filter(SemanticCatalogSnapshot.Model::isEnabled)
+			.map(SemanticCatalogSnapshot.Model::getModelCode)
+			.filter(StringUtils::hasText)
+			.collect(Collectors.toUnmodifiableSet());
+		Set<String> referencedModels = referencedModels(plan);
+		Set<String> missingModels = new LinkedHashSet<>(referencedModels);
+		missingModels.removeAll(enabledModels);
+		if (!missingModels.isEmpty()) {
+			return Decision.invalid("Semantic Blueprint references models not enabled in the active Catalog: "
+					+ missingModels.stream().sorted().collect(Collectors.joining(", ")));
+		}
+
+		Set<Integer> enabledDatasources = catalog.enabledDatasourceIds();
+		for (SemanticBlueprint.SourceSubPlan source : plan.getSourceSubPlans()) {
+			Integer datasourceId = source.getDatasourceId();
+			if (datasourceId == null || !enabledDatasources.contains(datasourceId)) {
+				return Decision.invalid("Semantic Blueprint references a datasource not enabled in the active Catalog: "
+						+ datasourceId);
+			}
+			SqlDialect dialect = dialects == null ? null : dialects.get(datasourceId);
+			if (dialect == null) {
+				return Decision.invalid("SQL dialect is unavailable for datasource " + datasourceId);
+			}
+			Decision dialectDecision = validateDialectRequirements(plan, source, dialect, intent.requiredCapabilities());
+			if (dialectDecision != null) {
+				return dialectDecision;
+			}
+		}
+		return intent;
+	}
+
+	private static Decision validateDialectRequirements(SemanticBlueprint plan, SemanticBlueprint.SourceSubPlan source,
+			SqlDialect dialect, Set<Capability> required) {
+		Set<String> sourceModels = Set.copyOf(source.getModelCodes());
+		for (SemanticBlueprint.GroupSelection group : plan.getGroupBy()) {
+			if (!StringUtils.hasText(group.getTimeBucketGranularity()) || !sourceModels.contains(group.getModelCode())) {
+				continue;
+			}
+			try {
+				dialect.timeBucket("probe_ts", group.getTimeBucketGranularity());
+			}
+			catch (IllegalArgumentException unsupported) {
+				return Decision.requiresGeneration(required, Set.of(Capability.TIME_BUCKET),
+						"Deterministic SQL generator cannot lower time bucket " + group.getTimeBucketGranularity()
+								+ " for " + dialect.name());
+			}
+		}
+		return null;
+	}
+
+	private static Set<String> referencedModels(SemanticBlueprint plan) {
+		LinkedHashSet<String> result = new LinkedHashSet<>();
+		plan.getModels().stream().map(SemanticBlueprint.ModelSelection::getModelCode).filter(StringUtils::hasText)
+			.forEach(result::add);
+		plan.getMetrics().stream().map(SemanticBlueprint.MetricSelection::getModelCode).filter(StringUtils::hasText)
+			.forEach(result::add);
+		plan.getDimensions().stream().map(SemanticBlueprint.DimensionSelection::getModelCode).filter(StringUtils::hasText)
+			.forEach(result::add);
+		plan.getProjections().stream().map(SemanticBlueprint.ProjectionSelection::getModelCode).filter(StringUtils::hasText)
+			.forEach(result::add);
+		plan.getFilters().stream().map(SemanticBlueprint.FilterSelection::getModelCode).filter(StringUtils::hasText)
+			.forEach(result::add);
+		plan.getGroupBy().stream().map(SemanticBlueprint.GroupSelection::getModelCode).filter(StringUtils::hasText)
+			.forEach(result::add);
+		plan.getRelationships().forEach(relationship -> {
+			if (StringUtils.hasText(relationship.getSourceModelCode())) {
+				result.add(relationship.getSourceModelCode());
+			}
+			if (StringUtils.hasText(relationship.getTargetModelCode())) {
+				result.add(relationship.getTargetModelCode());
+			}
+		});
+		plan.getSourceSubPlans().stream().flatMap(source -> source.getModelCodes().stream()).filter(StringUtils::hasText)
+			.forEach(result::add);
+		return Set.copyOf(result);
 	}
 
 	public static Set<Capability> effectiveCapabilities(SemanticBlueprint plan) {

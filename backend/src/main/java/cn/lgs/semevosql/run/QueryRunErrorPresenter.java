@@ -39,6 +39,8 @@ public class QueryRunErrorPresenter {
 		String code = StringUtils.hasText(errorCode) ? errorCode.trim() : "QUERY_EXECUTION_FAILED";
 		return switch (code) {
 			case "MODEL_OUTPUT_INVALID" -> new ErrorPresentation(code, "模型返回结果格式无效，请重试。", true);
+			case "INTERACTIVE_QUERY_TIMEOUT", "MODEL_PROVIDER_TIMEOUT" ->
+				new ErrorPresentation("QUERY_TIMEOUT", "查询执行超时，请稍后重试；如果问题较复杂，可缩小查询范围后重试。", true);
 			case "MODEL_UNAVAILABLE", "MODEL_CONNECTION_FAILED", "MODEL_PROVIDER_UNAVAILABLE" ->
 				new ErrorPresentation("MODEL_UNAVAILABLE", "模型服务暂时不可用，请稍后重试。", true);
 			case "SEMANTIC_CLARIFICATION_REQUIRED" ->

@@ -15,9 +15,8 @@
  */
 package cn.lgs.semevosql.retention;
 
-import cn.lgs.semevosql.common.OperatorAuthorizationService;
+import cn.lgs.semevosql.common.LocalOperatorService;
 import cn.lgs.semevosql.common.OperatorContext;
-import cn.lgs.semevosql.common.OperatorRole;
 import cn.lgs.semevosql.retention.QueryRunRetentionRepository.RetentionBatch;
 import cn.lgs.semevosql.retention.QueryRunRetentionRepository.RunArchive;
 import java.security.Principal;
@@ -40,7 +39,7 @@ public class QueryRunRetentionController {
 
 	private final OperatorContext.Resolver operatorResolver;
 
-	private final OperatorAuthorizationService authorization;
+	private final LocalOperatorService authorization;
 
 	@PostMapping("/runs")
 	public RetentionBatch run(@RequestHeader("Idempotency-Key") String idempotencyKey,
@@ -63,7 +62,7 @@ public class QueryRunRetentionController {
 
 	private void require(HttpHeaders headers, Principal principal, String operation) {
 		OperatorContext operator = operatorResolver.resolve(headers, principal, operation);
-		authorization.requireAtLeast(operator, OperatorRole.ADMIN, operation);
+		authorization.require(operator, operation);
 	}
 
 }

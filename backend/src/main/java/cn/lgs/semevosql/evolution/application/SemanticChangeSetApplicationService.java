@@ -208,6 +208,31 @@ public class SemanticChangeSetApplicationService {
         return get(changeSetId);
     }
 
+    /**
+     * Persist the durable outcome of an asynchronous replay without advancing the release
+     * state. A replay that needs review remains REPLAYING so it can be retried after a new
+     * approved replay, but its latest run and summary must never be invisible to operators.
+     */
+    @Transactional
+    public ChangeSet recordReplayOutcome(String changeSetId, String replayRunId, Object replaySummary) {
+        ChangeSet current = lock(changeSetId);
+        if (current.status() != Status.REPLAYING) {
+            return current;
+        }
+        String summaryJson = nullableJson(replaySummary);
+        int updated = jdbc.update("""
+                UPDATE qw_semantic_change_set
+                SET replay_run_id = COALESCE(?, replay_run_id),
+                    replay_summary_json = COALESCE(CAST(? AS JSONB), replay_summary_json),
+                    revision = revision + 1, update_time = CURRENT_TIMESTAMP
+                WHERE id = ? AND status = 'REPLAYING'
+                """, replayRunId, summaryJson, changeSetId);
+        if (updated != 1) {
+            throw new IllegalStateException("SemanticChangeSet replay outcome changed concurrently: " + changeSetId);
+        }
+        return get(changeSetId);
+    }
+
     @Transactional
     public ChangeSet rebase(String changeSetId, Long newBaseSemanticVersionId) {
         ChangeSet current = lock(changeSetId);

@@ -18,6 +18,7 @@ package cn.lgs.semevosql.workflow.node;
 import static cn.lgs.semevosql.constant.Constant.ACTIVE_TODO_ID;
 import static cn.lgs.semevosql.constant.Constant.APPROVAL_REQUIRED;
 import static cn.lgs.semevosql.constant.Constant.APPROVED_PLAN_RECOVERY;
+import static cn.lgs.semevosql.constant.Constant.ATTEMPT_ID;
 import static cn.lgs.semevosql.constant.Constant.CATALOG_HASH;
 import static cn.lgs.semevosql.constant.Constant.FORCE_SEMANTIC_REPLAN;
 import static cn.lgs.semevosql.constant.Constant.GENEGRATED_SEMANTIC_MODEL_PROMPT;
@@ -30,6 +31,7 @@ import static cn.lgs.semevosql.constant.Constant.QUERY_PATTERN_ID;
 import static cn.lgs.semevosql.constant.Constant.RETRIEVAL_REPAIR_HINT;
 import static cn.lgs.semevosql.constant.Constant.RETRIEVAL_REPAIR_QUERY;
 import static cn.lgs.semevosql.constant.Constant.RUN_ID;
+import static cn.lgs.semevosql.constant.Constant.RUN_DEADLINE_EPOCH_MILLIS;
 import static cn.lgs.semevosql.constant.Constant.SEMANTIC_REPLAN_FEEDBACK;
 import static cn.lgs.semevosql.constant.Constant.TABLE_RELATION_OUTPUT;
 import static cn.lgs.semevosql.constant.Constant.TODO_ENABLED;
@@ -50,6 +52,7 @@ import cn.lgs.semevosql.run.ExecutionSnapshotService;
 import cn.lgs.semevosql.run.QueryExecutionEvidence;
 import cn.lgs.semevosql.run.QueryRun;
 import cn.lgs.semevosql.run.QueryRunService;
+import cn.lgs.semevosql.run.RunExecutionFenceService;
 import cn.lgs.semevosql.semantic.application.SemanticCatalogApplicationService;
 import cn.lgs.semevosql.semantic.application.SemanticPlanningClarificationRequiredException;
 import cn.lgs.semevosql.semantic.application.SemanticBlueprintPipeline;
@@ -96,6 +99,8 @@ public class SemanticBlueprintNode implements NodeAction {
 
 	private final QueryRunService queryRunService;
 
+	private final RunExecutionFenceService executionFence;
+
 	private final ExecutionSnapshotService executionSnapshotService;
 
 	private final TrajectoryAnalysisService trajectoryAnalysisService;
@@ -136,6 +141,8 @@ public class SemanticBlueprintNode implements NodeAction {
 
 		String catalogHash = StateUtil.getStringValue(state, CATALOG_HASH, null);
 		String runId = StateUtil.getStringValue(state, RUN_ID, null);
+		String attemptId = StateUtil.getStringValue(state, ATTEMPT_ID, null);
+		Long runDeadlineEpochMillis = StateUtil.getObjectValue(state, RUN_DEADLINE_EPOCH_MILLIS, Long.class, (Long) null);
 		String contextHash = contextFingerprintService.fingerprint(runId, planningQuery);
 		String principalId = StateUtil.getStringValue(state, PRINCIPAL_ID, null);
 		BindingContext emptyBindings = new BindingContext(List.of(), QueryCaseHints.empty(), List.of());
@@ -168,14 +175,16 @@ public class SemanticBlueprintNode implements NodeAction {
 					.toList();
 		PlanResolution resolution;
 		try {
-			resolution = resolvePlan(runId, projectId, projectVersionId, catalogHash, planningQuery, contextHash,
-					planningTables, requiredHints, forceReplan, retrievalRepairQuery, principalId);
+			resolution = resolvePlan(runId, attemptId, runDeadlineEpochMillis, projectId, projectVersionId, catalogHash,
+					planningQuery, contextHash, planningTables, requiredHints, forceReplan, retrievalRepairQuery, principalId);
 		}
 		catch (SemanticPlanningClarificationRequiredException clarificationRequired) {
+			executionFence.assertActive(runId, attemptId);
 			var clarification = runtimeClarificationService.createPlanningClarification(runId, planningQuery,
 					clarificationRequired.clarification());
 			throw new RuntimeClarificationRequiredException(runId, clarification.clarificationId());
 		}
+		executionFence.assertActive(runId, attemptId);
 		SemanticBlueprint plan = resolution.plan();
 		plan.setBindingDependencies(bindingDependencies(mergedBindings));
 		String activeTodoId = StateUtil.getStringValue(state, ACTIVE_TODO_ID, "");
@@ -378,20 +387,23 @@ public class SemanticBlueprintNode implements NodeAction {
 		return List.copyOf(unique.values());
 	}
 
-	private PlanResolution resolvePlan(String runId, Long projectId, Long projectVersionId, String catalogHash,
-			String canonicalQuery, String contextHash, List<String> physicalTables, QueryCaseHints requiredHints,
-			boolean forceReplan, String retrievalRepairQuery, String principalId) {
+	private PlanResolution resolvePlan(String runId, String attemptId, Long runDeadlineEpochMillis, Long projectId,
+			Long projectVersionId, String catalogHash, String canonicalQuery, String contextHash,
+			List<String> physicalTables, QueryCaseHints requiredHints, boolean forceReplan, String retrievalRepairQuery,
+			String principalId) {
 		Optional<SemanticBlueprint> pinned = !forceReplan && (requiredHints == null || requiredHints.emptyHints())
 				? pinnedPlan(runId, projectId, projectVersionId, physicalTables) : Optional.empty();
 		if (pinned.isPresent()) {
 			QueryCaseHints historicalHints = queryExampleService.recallHints(projectId, projectVersionId, catalogHash,
 					canonicalQuery, contextHash, principalId, 5);
+			executionFence.assertActive(runId, attemptId);
 			queryExampleService.recordHintUsage(runId, historicalHints);
 			return new PlanResolution(pinned.orElseThrow(), historicalHints);
 		}
 		PlanningResult planning = semanticBlueprintPipeline.plan(new PlanningRequest(projectId, projectVersionId,
 				catalogHash, canonicalQuery, contextHash, physicalTables, requiredHints, 20, 5, retrievalRepairQuery,
-				principalId));
+				principalId, runDeadlineEpochMillis));
+		executionFence.assertActive(runId, attemptId);
 		queryExampleService.recordHintUsage(runId, planning.historicalHints());
 		if (runId != null && !runId.isBlank()) {
 			QueryExecutionEvidence evidence = QueryExecutionEvidence.semanticPlanning(planning);

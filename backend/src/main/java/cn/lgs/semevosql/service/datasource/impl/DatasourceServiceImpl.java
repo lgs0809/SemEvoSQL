@@ -52,7 +52,6 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-// todo: 检查Mapper的返回值，判断是否执行成功（或者对Mapper进行AOP）
 @Slf4j
 @Service
 @AllArgsConstructor
@@ -117,8 +116,8 @@ public class DatasourceServiceImpl implements DatasourceService {
 		}
 		persisted
 			.setPassword(secretCipher.encryptPlaintext(persisted.getPassword() == null ? "" : persisted.getPassword()));
-		if (datasourceMapper.insert(persisted) == 0) {
-			throw new RuntimeException("Datasource insert failed");
+		if (datasourceMapper.insert(persisted) != 1) {
+			throw new IllegalStateException("Datasource insert did not persist exactly one row");
 		}
 		return toPublicDatasource(persisted);
 	}
@@ -136,8 +135,8 @@ public class DatasourceServiceImpl implements DatasourceService {
 		if (StringUtils.isNotBlank(connectionUrl)) {
 			persisted.setConnectionUrl(connectionUrl);
 		}
-		if (datasourceMapper.updateById(persisted) == 0) {
-			throw new RuntimeException("Datasource update failed");
+		if (datasourceMapper.updateById(persisted) != 1) {
+			throw new IllegalStateException("Datasource update did not persist exactly one row");
 		}
 		persisted.setTestStatus("unknown");
 		persisted.setLastTestTime(null);

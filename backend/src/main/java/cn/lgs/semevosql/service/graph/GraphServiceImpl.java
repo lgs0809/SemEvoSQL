@@ -32,7 +32,10 @@ import cn.lgs.semevosql.run.QueryRun.RunStatus;
 import cn.lgs.semevosql.run.QueryRun.RunType;
 import cn.lgs.semevosql.run.QueryRunService;
 import cn.lgs.semevosql.run.QueryRunService.CreateRunCommand;
+import cn.lgs.semevosql.run.LateRunResultDroppedException;
 import cn.lgs.semevosql.run.RunEvent;
+import cn.lgs.semevosql.run.RunDeadlineExceededException;
+import cn.lgs.semevosql.run.RunExecutionFenceService;
 import cn.lgs.semevosql.run.RunInProgressException;
 import cn.lgs.semevosql.run.RunLeaseUnavailableException;
 import cn.lgs.semevosql.run.ThreadExecutionGuardService;
@@ -59,6 +62,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 
 import java.time.Duration;
@@ -109,6 +113,8 @@ public class GraphServiceImpl implements GraphService {
 
 	private final QueryRunService runService;
 
+	private final RunExecutionFenceService executionFence;
+
 	private final QueryRunErrorPresenter runErrorPresenter;
 
 	private final RuntimeClarificationService clarificationService;
@@ -127,6 +133,7 @@ public class GraphServiceImpl implements GraphService {
 			MultiTurnContextManager multiTurnContextManager, LangfuseService langfuseReporter,
 			ProjectRuntimeGate projectRuntimeGate, ProjectRuntimeProfileService runtimeProfileService,
 			SemEvoSQLProductionService productionService, QueryRunService runService,
+			RunExecutionFenceService executionFence,
 			QueryRunErrorPresenter runErrorPresenter, RuntimeClarificationService clarificationService,
 			ThreadExecutionGuardService threadExecutionGuardService,
 			ExecutionSnapshotService executionSnapshotService, GraphDurableRecoveryPlanner durableRecoveryPlanner,
@@ -143,6 +150,7 @@ public class GraphServiceImpl implements GraphService {
 		this.runtimeProfileService = runtimeProfileService;
 		this.productionService = productionService;
 		this.runService = runService;
+		this.executionFence = executionFence;
 		this.runErrorPresenter = runErrorPresenter;
 		this.clarificationService = clarificationService;
 		this.threadExecutionGuardService = threadExecutionGuardService;
@@ -806,6 +814,7 @@ public class GraphServiceImpl implements GraphService {
 		context.setEpisodeId(episodeId);
 		context.setAttemptId(attemptId);
 		context.setEpisodeStartNanos(System.nanoTime());
+		context.setDeadlineEpochMillis(System.currentTimeMillis() + interactiveTaskTimeoutMs);
 		if (run.status() == RunStatus.QUEUED) {
 			run = runService.transition(run.runId(), RunStatus.RUNNING, run.currentNode(), null, null);
 		}
@@ -848,6 +857,7 @@ public class GraphServiceImpl implements GraphService {
 		initialState.put(EPISODE_ID, episodeId);
 		initialState.put(ATTEMPT_ID, attemptId);
 		initialState.put(RUN_ID, run.runId());
+		initialState.put(RUN_DEADLINE_EPOCH_MILLIS, context.getDeadlineEpochMillis());
 		initialState.put(PRINCIPAL_ID, graphRequest.getPrincipalId());
 		initialState.put(APPROVAL_REQUIRED, humanReviewEnabled);
 		initialState.put(HUMAN_REVIEW_ENABLED, humanReviewEnabled);
@@ -912,6 +922,7 @@ public class GraphServiceImpl implements GraphService {
 		context.setEpisodeId(run.episodeId());
 		context.setAttemptId(run.attemptId());
 		context.setEpisodeStartNanos(System.nanoTime());
+		context.setDeadlineEpochMillis(System.currentTimeMillis() + interactiveTaskTimeoutMs);
 		if (run.status() == RunStatus.QUEUED || run.status() == RunStatus.WAITING_HUMAN) {
 			run = runService.transition(run.runId(), RunStatus.RUNNING, HUMAN_FEEDBACK_NODE, null, null);
 		}
@@ -941,6 +952,7 @@ public class GraphServiceImpl implements GraphService {
 		stateUpdate.put(EPISODE_ID, run.episodeId());
 		stateUpdate.put(ATTEMPT_ID, run.attemptId());
 		stateUpdate.put(RUN_ID, run.runId());
+		stateUpdate.put(RUN_DEADLINE_EPOCH_MILLIS, context.getDeadlineEpochMillis());
 		stateUpdate.put(HUMAN_FEEDBACK_DATA, feedbackData);
 		stateUpdate.put(MULTI_TURN_CONTEXT, feedbackContext.rendered());
 		stateUpdate.put(CONVERSATION_CONTEXT_ENVELOPE, feedbackContext.envelope());
@@ -1130,10 +1142,10 @@ public class GraphServiceImpl implements GraphService {
 						log.debug("StreamContext cleaned before subscription for threadId: {}", threadId);
 						return;
 					}
-					Disposable disposable = nodeOutputFlux.timeout(Duration.ofMillis(interactiveTaskTimeoutMs))
-						.subscribe(output -> handleNodeOutput(graphRequest, output),
-								error -> handleStreamError(agentId, threadId, error),
-								() -> handleStreamComplete(graphRequest, agentId, threadId));
+					Disposable disposable = enforceAbsoluteDeadline(nodeOutputFlux, context.getDeadlineEpochMillis())
+						.subscribe(output -> handleNodeOutput(context, graphRequest, output),
+								error -> handleStreamError(context, agentId, threadId, error),
+								() -> handleStreamComplete(context, graphRequest, agentId, threadId));
 					synchronized (context) {
 						if (context.isCleaned()) {
 							if (disposable != null && !disposable.isDisposed()) {
@@ -1147,7 +1159,7 @@ public class GraphServiceImpl implements GraphService {
 				}
 				catch (Throwable error) {
 					if (!context.isCleaned()) {
-						handleStreamError(agentId, threadId, error);
+						handleStreamError(context, agentId, threadId, error);
 					}
 				}
 			}, executor);
@@ -1158,13 +1170,36 @@ public class GraphServiceImpl implements GraphService {
 		}
 	}
 
+	static <T> Flux<T> enforceAbsoluteDeadline(Flux<T> source, long deadlineEpochMillis) {
+		long remainingMs = deadlineEpochMillis - System.currentTimeMillis();
+		if (remainingMs <= 0L) {
+			return Flux.error(new RunDeadlineExceededException("Interactive Run deadline exhausted before subscription"));
+		}
+		Mono<Long> deadlineSignal = Mono.delay(Duration.ofMillis(remainingMs))
+			.flatMap(ignored -> Mono
+				.error(new RunDeadlineExceededException("Interactive Run exceeded its absolute execution deadline")));
+		return source.takeUntilOther(deadlineSignal);
+	}
+
 	/**
 	 * 处理流式错误 线程安全：使用 remove 操作确保只有一个线程能获取到 context
 	 */
-	private void handleStreamError(String agentId, String threadId, Throwable error) {
+	private void handleStreamError(StreamContext context, String agentId, String threadId, Throwable error) {
+		if (causedBy(error, LateRunResultDroppedException.class)) {
+			log.info("Discarded late Graph result for run={}, attempt={}: {}", context.getRunId(), context.getAttemptId(),
+					error.getMessage());
+			streamContextMap.remove(threadId, context);
+			context.cleanup();
+			return;
+		}
 		log.error("Error in stream processing for threadId: {}: ", threadId, error);
-		StreamContext context = streamContextMap.remove(threadId);
-		if (context == null || context.isCleaned()) {
+		if (!streamContextMap.remove(threadId, context)) {
+			// A recovered attempt may already own the same conversation thread. Never let this callback remove or
+			// finalize that newer StreamContext.
+			context.cleanup();
+			return;
+		}
+		if (context.isCleaned()) {
 			return;
 		}
 		if (finishCancellationIfRequested(context)) {
@@ -1250,10 +1285,17 @@ public class GraphServiceImpl implements GraphService {
 	/**
 	 * 处理流式完成 线程安全：使用 remove 操作确保只有一个线程能获取到 context
 	 */
-	private void handleStreamComplete(GraphRequest request, String agentId, String threadId) {
+	private void handleStreamComplete(StreamContext context, GraphRequest request, String agentId, String threadId) {
 		log.info("Stream processing completed successfully for threadId: {}", threadId);
-		StreamContext context = streamContextMap.get(threadId);
-		if (context != null && !context.isCleaned()) {
+		if (streamContextMap.get(threadId) == context && !context.isCleaned()) {
+			try {
+				executionFence.assertActive(context.getRunId(), context.getAttemptId());
+			}
+			catch (LateRunResultDroppedException dropped) {
+				streamContextMap.remove(threadId, context);
+				context.cleanup();
+				return;
+			}
 			if (finishCancellationIfRequested(context)) {
 				streamContextMap.remove(threadId, context);
 				multiTurnContextManager.discardPending(threadId);
@@ -1265,7 +1307,7 @@ public class GraphServiceImpl implements GraphService {
 						&& isWaitingAtHumanFeedback(threadId);
 			}
 			catch (RuntimeException ex) {
-				handleStreamError(agentId, threadId, ex);
+				handleStreamError(context, agentId, threadId, ex);
 				return;
 			}
 			streamContextMap.remove(threadId, context);
@@ -1484,10 +1526,10 @@ public class GraphServiceImpl implements GraphService {
 	/**
 	 * 处理节点输出
 	 */
-	private void handleNodeOutput(GraphRequest request, NodeOutput output) {
+	private void handleNodeOutput(StreamContext context, GraphRequest request, NodeOutput output) {
 		log.debug("Received output: {}", output.getClass().getSimpleName());
 		if (output instanceof StreamingOutput streamingOutput) {
-			handleStreamNodeOutput(request, streamingOutput);
+			handleStreamNodeOutput(context, request, streamingOutput);
 		}
 	}
 
@@ -1621,6 +1663,15 @@ public class GraphServiceImpl implements GraphService {
 		return value.length() <= 500 ? value : value.substring(0, 500);
 	}
 
+	private static boolean causedBy(Throwable error, Class<? extends Throwable> type) {
+		for (Throwable current = error; current != null && current.getCause() != current; current = current.getCause()) {
+			if (type.isInstance(current)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	private boolean suppressDurableReplayOutput(GraphRequest request, String node) {
 		if (!request.isDurableRecoveryTakeover()) {
 			return false;
@@ -1677,14 +1728,14 @@ public class GraphServiceImpl implements GraphService {
 	}
 
 	@SuppressWarnings("deprecation") // Spring AI Alibaba 1.1.2.0 has no equivalent getter for explicit chunk outputs.
-	private void handleStreamNodeOutput(GraphRequest request, StreamingOutput output) {
+	private void handleStreamNodeOutput(StreamContext context, GraphRequest request, StreamingOutput output) {
 		String threadId = request.getThreadId();
-		StreamContext context = streamContextMap.get(threadId);
 		// 检查是否已经停止处理
-		if (context == null || context.getSink() == null) {
+		if (streamContextMap.get(threadId) != context || context.isCleaned() || context.getSink() == null) {
 			log.debug("Stream processing already stopped for threadId: {}, skipping output", threadId);
 			return;
 		}
+		executionFence.assertActive(context.getRunId(), context.getAttemptId());
 		String node = output.node();
 		String chunk = output.chunk();
 		log.debug("Received Stream output: {}", chunk);

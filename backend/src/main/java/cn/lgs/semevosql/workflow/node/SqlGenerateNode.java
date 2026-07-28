@@ -183,8 +183,9 @@ public class SqlGenerateNode implements NodeAction {
 				(SemanticBlueprint) null);
 		Integer datasourceId = StateUtil.getObjectValue(state, DATASOURCE_ID, Integer.class, (Integer) null);
 		String runId = StateUtil.getStringValue(state, RUN_ID, null);
+		String attemptId = StateUtil.getStringValue(state, ATTEMPT_ID, null);
 		String semanticPatternHints = semanticSqlPatternService.renderReusablePatternHints(projectId, projectVersionId,
-				catalogHash, datasourceId, principalId, runId, semanticPlan, 3);
+				catalogHash, datasourceId, principalId, runId, attemptId, semanticPlan, 3);
 		String queryExamples = approvedExamples + semanticPatternHints;
 
 		SqlGenerationDTO sqlGenerationDTO = SqlGenerationDTO.builder()

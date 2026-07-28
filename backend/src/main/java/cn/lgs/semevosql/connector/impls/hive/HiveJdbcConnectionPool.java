@@ -21,7 +21,6 @@ import cn.lgs.semevosql.enums.BizDataSourceTypeEnum;
 import cn.lgs.semevosql.enums.ErrorCodeEnum;
 import com.alibaba.druid.pool.DruidDataSourceFactory;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Service;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -42,7 +41,6 @@ import static cn.lgs.semevosql.enums.ErrorCodeEnum.SUCCESS;
  * Hive JDBC connection pool implementation.
  */
 @Slf4j
-@Service("hiveJdbcConnectionPool")
 public class HiveJdbcConnectionPool extends AbstractDBConnectionPool {
 
 	private static final String DRIVER = "org.apache.hive.jdbc.HiveDriver";

@@ -13,20 +13,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package cn.lgs.semevosql.project.security;
+package cn.lgs.semevosql.run;
 
-public enum ProjectAccessRole {
+/**
+ * Signals that a blocking Graph node returned after its durable Run/Attempt authority had ended.
+ *
+ * <p>This exception is a control fence, not a new Run failure. The terminal or superseding attempt
+ * remains authoritative and the late result must be discarded without business side effects.</p>
+ */
+public class LateRunResultDroppedException extends IllegalStateException {
 
-	VIEWER(10), EDITOR(20), OWNER(30);
-
-	private final int authority;
-
-	ProjectAccessRole(int authority) {
-		this.authority = authority;
+	public LateRunResultDroppedException(String message) {
+		super(message);
 	}
-
-	public boolean atLeast(ProjectAccessRole required) {
-		return authority >= required.authority;
-	}
-
 }

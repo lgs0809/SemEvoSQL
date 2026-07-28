@@ -18,6 +18,7 @@ package cn.lgs.semevosql.learning;
 import cn.lgs.semevosql.common.json.CanonicalJson;
 import cn.lgs.semevosql.common.json.JsonPayloadRegistry;
 import cn.lgs.semevosql.common.json.VersionedJson;
+import cn.lgs.semevosql.run.SemanticPlanSnapshotService;
 import cn.lgs.semevosql.semantic.application.SemanticCatalogPatchAnalyzer;
 import cn.lgs.semevosql.semantic.domain.SemanticAssetProvenance.AssetType;
 import cn.lgs.semevosql.semantic.domain.SemanticCatalogRepository;
@@ -72,11 +73,14 @@ public class QueryCaseCaptureService {
 
 	private final SemanticCatalogRepository catalogRepository;
 
+	private final SemanticPlanSnapshotService semanticPlanSnapshots;
+
 	public QueryCaseCaptureService(JdbcTemplate jdbc, QueryCaseRepository repository,
 			QueryCaseAssetReferenceRepository assetReferences, QueryCaseLineageService lineageService,
 			QueryCaseRetrievalIndexService retrievalIndex,
 			ConversationContextDependencyFingerprintService contextFingerprintService,
-			SemanticCatalogPatchAnalyzer patchAnalyzer, SemanticCatalogRepository catalogRepository) {
+			SemanticCatalogPatchAnalyzer patchAnalyzer, SemanticCatalogRepository catalogRepository,
+			SemanticPlanSnapshotService semanticPlanSnapshots) {
 		this.jdbc = jdbc;
 		this.repository = repository;
 		this.assetReferences = assetReferences;
@@ -85,6 +89,7 @@ public class QueryCaseCaptureService {
 		this.contextFingerprintService = contextFingerprintService;
 		this.patchAnalyzer = patchAnalyzer;
 		this.catalogRepository = catalogRepository;
+		this.semanticPlanSnapshots = semanticPlanSnapshots;
 	}
 
 	@Transactional
@@ -126,7 +131,7 @@ public class QueryCaseCaptureService {
 		Integer datasourceId = source.get("datasource_id") == null ? null
 				: ((Number) source.get("datasource_id")).intValue();
 		String runId = Objects.toString(source.get("run_id"), "");
-		Optional<SemanticBlueprint> plan = readPlan(Objects.toString(source.get("execution_snapshot"), ""), runId);
+		Optional<SemanticBlueprint> plan = semanticPlanSnapshots.latest(runId);
 		String typedIrJson = plan.map(value -> versionedJson.write(JsonPayloadRegistry.SEMANTIC_QUERY_PLAN, value))
 			.orElse(null);
 		String intentType = plan.map(this::intentType).orElse(null);
@@ -275,38 +280,6 @@ public class QueryCaseCaptureService {
 		}
 		catch (Exception ignored) {
 			return Map.of();
-		}
-	}
-
-	private Optional<SemanticBlueprint> readPlan(String executionSnapshotJson, String runId) {
-		if (StringUtils.hasText(executionSnapshotJson)) {
-			try {
-				JsonNode root = versionedJson.payload(executionSnapshotJson, JsonPayloadRegistry.EXECUTION_SNAPSHOT);
-				JsonNode plan = root.get("semanticPlan");
-				if (plan != null && !plan.isNull()) {
-					return Optional.of(mapper.treeToValue(plan, SemanticBlueprint.class));
-				}
-			}
-			catch (Exception ignored) {
-				// Fall through to the authoritative runtime Semantic Plan snapshot below.
-			}
-		}
-		if (!StringUtils.hasText(runId)) {
-			return Optional.empty();
-		}
-		List<String> snapshots = jdbc.queryForList("""
-				SELECT payload FROM qw_run_event
-				WHERE run_id = ? AND event_type = 'SEMANTIC_PLAN_SNAPSHOT'
-				ORDER BY sequence DESC LIMIT 1
-				""", String.class, runId);
-		if (snapshots.isEmpty() || !StringUtils.hasText(snapshots.get(0))) {
-			return Optional.empty();
-		}
-		try {
-			return Optional.of(mapper.readValue(snapshots.get(0), SemanticBlueprint.class));
-		}
-		catch (Exception invalid) {
-			return Optional.empty();
 		}
 	}
 
@@ -461,6 +434,8 @@ public class QueryCaseCaptureService {
 		shape.put("intent", intentType(plan));
 		shape.put("computationCapabilities", plan.getComputationIntent() == null ? List.of()
 				: plan.getComputationIntent().capabilities().stream().map(Enum::name).sorted().toList());
+		shape.put("computationRequirements", plan.getComputationIntent() == null ? List.of()
+				: plan.getComputationIntent().canonicalRequirements());
 		shape.put("hasTime", plan.getTimeRange() != null);
 		return canonicalJson.hash(shape);
 	}

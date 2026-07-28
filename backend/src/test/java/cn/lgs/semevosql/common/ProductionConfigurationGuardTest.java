@@ -26,56 +26,10 @@ import org.springframework.mock.env.MockEnvironment;
 class ProductionConfigurationGuardTest {
 
 	@Test
-	void fullyConfiguredApplicationRuntimePassesGuard() {
-		MockEnvironment environment = baseEnvironment();
-		CodeExecutorProperties executor = remoteExecutor();
-		ProductionConfigurationGuard guard = new ProductionConfigurationGuard(new OperatorContextProperties(), executor,
-				environment);
+	void fullyConfiguredSingleUserApplicationRuntimePassesGuard() {
+		ProductionConfigurationGuard guard = new ProductionConfigurationGuard(remoteExecutor(), baseEnvironment());
 
 		assertThatCode(() -> guard.run(null)).doesNotThrowAnyException();
-	}
-
-	@Test
-	void selfHostedSingleUserRuntimePassesWithoutIssuer() {
-		MockEnvironment environment = baseEnvironment(false);
-		environment.setProperty("semevosql.security.enabled", "false");
-		OperatorContextProperties operator = new OperatorContextProperties();
-		operator.setDevelopmentMode(true);
-		ProductionConfigurationGuard guard = new ProductionConfigurationGuard(operator, remoteExecutor(), environment);
-
-		assertThatCode(() -> guard.run(null)).doesNotThrowAnyException();
-	}
-
-	@Test
-	void missingIssuerIsReportedWhenAuthenticatedSecurityIsEnabled() {
-		MockEnvironment environment = baseEnvironment(false);
-		ProductionConfigurationGuard guard = new ProductionConfigurationGuard(new OperatorContextProperties(),
-				remoteExecutor(), environment);
-
-		assertThatThrownBy(() -> guard.run(null)).isInstanceOf(IllegalStateException.class)
-			.hasMessageContaining("spring.security.oauth2.resourceserver.jwt.issuer-uri is required");
-	}
-
-	@Test
-	void unauthenticatedRuntimeRejectsDisabledSingleUserOperator() {
-		MockEnvironment environment = baseEnvironment(false);
-		environment.setProperty("semevosql.security.enabled", "false");
-		ProductionConfigurationGuard guard = new ProductionConfigurationGuard(new OperatorContextProperties(),
-				remoteExecutor(), environment);
-
-		assertThatThrownBy(() -> guard.run(null)).isInstanceOf(IllegalStateException.class)
-			.hasMessageContaining("single-user operator mode must be enabled");
-	}
-
-	@Test
-	void authenticatedRuntimeRejectsSingleUserOperatorFallback() {
-		MockEnvironment environment = baseEnvironment(true);
-		OperatorContextProperties operator = new OperatorContextProperties();
-		operator.setDevelopmentMode(true);
-		ProductionConfigurationGuard guard = new ProductionConfigurationGuard(operator, remoteExecutor(), environment);
-
-		assertThatThrownBy(() -> guard.run(null)).isInstanceOf(IllegalStateException.class)
-			.hasMessageContaining("single-user operator mode must be disabled");
 	}
 
 	@Test
@@ -86,11 +40,20 @@ class ProductionConfigurationGuardTest {
 		executor.setCodePoolExecutor(CodePoolExecutorEnum.DOCKER);
 		executor.setInternalToken("t".repeat(32));
 		executor.setImageName("example/python-runner:dev");
-		ProductionConfigurationGuard guard = new ProductionConfigurationGuard(new OperatorContextProperties(), executor,
-				environment);
+		ProductionConfigurationGuard guard = new ProductionConfigurationGuard(executor, environment);
 
 		assertThatThrownBy(() -> guard.run(null)).isInstanceOf(IllegalStateException.class)
 			.hasMessageContaining("release-pinned semevosql/python-runner:1.0.0");
+	}
+
+	@Test
+	void productionStillRequiresEncryptedSecretStorage() {
+		MockEnvironment environment = baseEnvironment();
+		environment.setProperty("semevosql.secrets.encryption-key", "");
+		ProductionConfigurationGuard guard = new ProductionConfigurationGuard(remoteExecutor(), environment);
+
+		assertThatThrownBy(() -> guard.run(null)).isInstanceOf(IllegalStateException.class)
+			.hasMessageContaining("semevosql.secrets.encryption-key is required");
 	}
 
 	private CodeExecutorProperties remoteExecutor() {
@@ -102,18 +65,10 @@ class ProductionConfigurationGuardTest {
 	}
 
 	private MockEnvironment baseEnvironment() {
-		return baseEnvironment(true);
-	}
-
-	private MockEnvironment baseEnvironment(boolean includeIssuer) {
 		MockEnvironment environment = new MockEnvironment();
 		environment.setProperty("semevosql.runtime-role", "application");
-		environment.setProperty("semevosql.security.enabled", "true");
 		environment.setProperty("semevosql.mcp.enabled", "false");
 		environment.setProperty("spring.ai.mcp.server.enabled", "false");
-		if (includeIssuer) {
-			environment.setProperty("spring.security.oauth2.resourceserver.jwt.issuer-uri", "https://issuer.example.test");
-		}
 		environment.setProperty("semevosql.secrets.encryption-key", "k".repeat(32));
 		environment.setProperty("spring.flyway.enabled", "true");
 		environment.setProperty("spring.sql.init.mode", "never");

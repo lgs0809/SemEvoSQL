@@ -11,10 +11,6 @@ semevosql:
     reject-full-table-scan: true
   mcp:
     enabled: ${SEMEVOSQL_MCP_ENABLED:true}
-  security:
-    enabled: ${SEMEVOSQL_SECURITY_ENABLED:false}
-  operator:
-    development-mode: ${SEMEVOSQL_SINGLE_USER_MODE:true}
 
 springdoc:
   api-docs:

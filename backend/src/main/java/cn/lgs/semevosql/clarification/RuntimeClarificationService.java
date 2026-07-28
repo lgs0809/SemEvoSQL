@@ -21,9 +21,8 @@ import cn.lgs.semevosql.clarification.RuntimeClarification.ClarificationStatus;
 import cn.lgs.semevosql.clarification.RuntimeClarificationRepository.ClarificationAnswer;
 import cn.lgs.semevosql.common.OptimisticLockingFailureException;
 import cn.lgs.semevosql.observability.SemEvoSQLMetrics;
-import cn.lgs.semevosql.common.OperatorAuthorizationService;
+import cn.lgs.semevosql.common.LocalOperatorService;
 import cn.lgs.semevosql.common.OperatorContext;
-import cn.lgs.semevosql.common.OperatorRole;
 import cn.lgs.semevosql.episode.application.EpisodeApplicationService;
 import cn.lgs.semevosql.episode.domain.EpisodeTurnType;
 import cn.lgs.semevosql.operations.SemanticCatalogCache;
@@ -89,7 +88,7 @@ public class RuntimeClarificationService implements ApplicationEventPublisherAwa
 
 	private final ProjectSemanticAliasWorkflowService projectAliasWorkflowService;
 
-	private final OperatorAuthorizationService authorization;
+	private final LocalOperatorService authorization;
 
 	private ApplicationEventPublisher eventPublisher = event -> {
 	};
@@ -100,7 +99,7 @@ public class RuntimeClarificationService implements ApplicationEventPublisherAwa
 			RuntimePrincipalResolver principalResolver,
 			RuntimeSemanticBindingService semanticBindingService, UserSemanticPreferenceService preferenceService,
 			ProjectSemanticAliasWorkflowService projectAliasWorkflowService,
-			OperatorAuthorizationService authorization) {
+			LocalOperatorService authorization) {
 		this.repository = repository;
 		this.catalogCache = catalogCache;
 		this.runService = runService;
@@ -885,16 +884,13 @@ public class RuntimeClarificationService implements ApplicationEventPublisherAwa
 			requireRunOwner(runId, operator);
 		}
 		else if (scope == SemanticBindingScope.PROJECT) {
-			authorization.requireAtLeast(operator, OperatorRole.EDITOR, "persist PROJECT semantic binding");
+			authorization.require(operator, "persist PROJECT semantic binding");
 		}
 	}
 
 	private void requireRunOwner(String runId, OperatorContext operator) {
 		if (operator == null) {
 			throw new SecurityException("A server-resolved OperatorContext is required for QUERY/USER semantic binding");
-		}
-		if (operator.role() == OperatorRole.ADMIN) {
-			return;
 		}
 		String principal = principalResolver.resolve(runService.get(runId));
 		if (!hasText(principal) || RuntimePrincipalResolver.ANONYMOUS.equals(principal)) {

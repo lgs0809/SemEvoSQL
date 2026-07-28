@@ -30,15 +30,11 @@ import org.springframework.util.StringUtils;
 @Profile("prod")
 public class ProductionConfigurationGuard implements ApplicationRunner {
 
-	private final OperatorContextProperties operatorProperties;
-
 	private final CodeExecutorProperties codeExecutorProperties;
 
 	private final Environment environment;
 
-	public ProductionConfigurationGuard(OperatorContextProperties operatorProperties,
-			CodeExecutorProperties codeExecutorProperties, Environment environment) {
-		this.operatorProperties = operatorProperties;
+	public ProductionConfigurationGuard(CodeExecutorProperties codeExecutorProperties, Environment environment) {
 		this.codeExecutorProperties = codeExecutorProperties;
 		this.environment = environment;
 	}
@@ -81,16 +77,6 @@ public class ProductionConfigurationGuard implements ApplicationRunner {
 			if (credential.length() < 32) {
 				throw invalid("execution broker internal credential must contain at least 32 characters");
 			}
-		}
-		boolean securityEnabled = Boolean.parseBoolean(required("semevosql.security.enabled"));
-		if (securityEnabled) {
-			if (operatorProperties.isDevelopmentMode()) {
-				throw invalid("single-user operator mode must be disabled when authenticated security is enabled");
-			}
-			required("spring.security.oauth2.resourceserver.jwt.issuer-uri");
-		}
-		else if (!operatorProperties.isDevelopmentMode()) {
-			throw invalid("single-user operator mode must be enabled when authenticated security is disabled");
 		}
 		boolean projectMcpEnabled = Boolean.parseBoolean(environment.getProperty("semevosql.mcp.enabled", "false"));
 		boolean springMcpEnabled = Boolean.parseBoolean(environment.getProperty("spring.ai.mcp.server.enabled", "false"));

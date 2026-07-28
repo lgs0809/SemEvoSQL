@@ -30,17 +30,23 @@ public class ModelCheckVo {
 
 	boolean chatModelReady;
 
+	String chatModelStatus;
+
 	java.time.LocalDateTime chatModelLastValidationTime;
 
 	boolean embeddingModelConfigured;
 
 	boolean embeddingModelReady;
 
+	String embeddingModelStatus;
+
 	java.time.LocalDateTime embeddingModelLastValidationTime;
 
 	boolean rerankModelConfigured;
 
 	boolean rerankModelReady;
+
+	String rerankModelStatus;
 
 	java.time.LocalDateTime rerankModelLastValidationTime;
 

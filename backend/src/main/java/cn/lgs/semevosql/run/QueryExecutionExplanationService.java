@@ -36,13 +36,13 @@ public class QueryExecutionExplanationService {
 
 	private final JdbcTemplate jdbc;
 
-	private final ExecutionSnapshotService snapshotService;
+	private final SemanticPlanSnapshotService semanticPlanSnapshots;
 
 	private final ObjectMapper mapper = JsonUtil.getObjectMapper();
 
-	public QueryExecutionExplanationService(JdbcTemplate jdbc, ExecutionSnapshotService snapshotService) {
+	public QueryExecutionExplanationService(JdbcTemplate jdbc, SemanticPlanSnapshotService semanticPlanSnapshots) {
 		this.jdbc = jdbc;
-		this.snapshotService = snapshotService;
+		this.semanticPlanSnapshots = semanticPlanSnapshots;
 	}
 
 	public QueryExecutionExplanation explain(QueryRun run) {
@@ -148,40 +148,7 @@ public class QueryExecutionExplanationService {
 	}
 
 	private SemanticBlueprint persistedSemanticPlan(QueryRun run) {
-		SemanticBlueprint snapshotPlan = snapshotService.readTyped(run.executionSnapshot())
-			.map(ExecutionSnapshot::semanticPlan)
-			.orElse(null);
-		if (snapshotPlan != null) {
-			return snapshotPlan;
-		}
-		List<String> eventPlans = jdbc.queryForList("""
-				SELECT payload FROM qw_run_event
-				WHERE run_id = ? AND event_type IN ('SEMANTIC_PLAN_SNAPSHOT', 'APPROVAL_PLAN_SNAPSHOT')
-				  AND payload IS NOT NULL
-				ORDER BY sequence DESC LIMIT 1
-				""", String.class, run.runId());
-		SemanticBlueprint eventPlan = readPlan(eventPlans.isEmpty() ? null : eventPlans.get(0));
-		if (eventPlan != null) {
-			return eventPlan;
-		}
-		List<String> todoPlans = jdbc.queryForList("""
-				SELECT semantic_plan_json::text FROM qw_query_task
-				WHERE run_id = ? AND semantic_plan_json IS NOT NULL
-				ORDER BY ordinal_no DESC LIMIT 1
-				""", String.class, run.runId());
-		return readPlan(todoPlans.isEmpty() ? null : todoPlans.get(0));
-	}
-
-	private SemanticBlueprint readPlan(String payload) {
-		if (!StringUtils.hasText(payload)) {
-			return null;
-		}
-		try {
-			return mapper.readValue(payload, SemanticBlueprint.class);
-		}
-		catch (Exception ignored) {
-			return null;
-		}
+		return semanticPlanSnapshots.latest(run.runId()).orElse(null);
 	}
 
 	private MessageEvidence messageEvidence(String runId) {

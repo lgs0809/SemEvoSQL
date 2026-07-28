@@ -15,9 +15,8 @@
  */
 package cn.lgs.semevosql.operations;
 
-import cn.lgs.semevosql.common.OperatorAuthorizationService;
+import cn.lgs.semevosql.common.LocalOperatorService;
 import cn.lgs.semevosql.common.OperatorContext;
-import cn.lgs.semevosql.common.OperatorRole;
 import cn.lgs.semevosql.operations.SemEvoSQLProductionService.CanaryRequest;
 import cn.lgs.semevosql.operations.SemEvoSQLProductionService.ReleaseRequest;
 import cn.lgs.semevosql.operations.SemEvoSQLProductionService.ShadowResult;
@@ -41,11 +40,11 @@ class ControlledReleaseService {
 
 	private final SemanticCatalogCache catalogCache;
 
-	private final OperatorAuthorizationService authorization;
+	private final LocalOperatorService authorization;
 
 	@Transactional
 	Map<String, Object> create(Long projectId, ReleaseRequest request, OperatorContext operator) {
-		authorization.requireAtLeast(operator, OperatorRole.PUBLISHER, "create controlled release");
+		authorization.require(operator, "create controlled release");
 		String id = UUID.randomUUID().toString();
 		jdbc.update("""
 				INSERT INTO qw_release
@@ -64,7 +63,7 @@ class ControlledReleaseService {
 
 	@Transactional
 	Map<String, Object> recordShadow(String releaseId, ShadowResult request, OperatorContext operator) {
-		authorization.requireAtLeast(operator, OperatorRole.PUBLISHER, "record release shadow result");
+		authorization.require(operator, "record release shadow result");
 		jdbc.update("""
 				UPDATE qw_release SET sample_count = sample_count + 1,
 				failure_count = failure_count + ?, metrics_json = ?, update_time = CURRENT_TIMESTAMP WHERE id = ?
@@ -81,7 +80,7 @@ class ControlledReleaseService {
 
 	@Transactional
 	Map<String, Object> advanceCanary(String releaseId, CanaryRequest request, OperatorContext operator) {
-		authorization.requireAtLeast(operator, OperatorRole.PUBLISHER, "advance release canary");
+		authorization.require(operator, "advance release canary");
 		Map<String, Object> current = get(releaseId);
 		int currentTraffic = ((Number) current.get("traffic_percent")).intValue();
 		int next = request.trafficPercent();
@@ -101,7 +100,7 @@ class ControlledReleaseService {
 
 	@Transactional
 	Map<String, Object> rollback(String releaseId, String reason, OperatorContext operator) {
-		authorization.requireAtLeast(operator, OperatorRole.PUBLISHER, "rollback controlled release");
+		authorization.require(operator, "rollback controlled release");
 		Map<String, Object> release = get(releaseId);
 		Long projectId = number(release.get("project_id"));
 		Long baseline = number(release.get("baseline_version_id"));

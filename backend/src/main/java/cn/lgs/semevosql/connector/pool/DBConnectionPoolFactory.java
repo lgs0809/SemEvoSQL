@@ -15,6 +15,7 @@
  */
 package cn.lgs.semevosql.connector.pool;
 
+import cn.lgs.semevosql.service.datasource.SemanticQueryDatasourceCapabilities;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -29,12 +30,22 @@ public class DBConnectionPoolFactory {
 
 	private final Map<String, DBConnectionPool> poolMap = new ConcurrentHashMap<>();
 
+	private final Map<String, DBConnectionPool> poolByDatasourceType = new ConcurrentHashMap<>();
+
 	public DBConnectionPoolFactory(List<DBConnectionPool> pools) {
 		pools.forEach(this::register);
 	}
 
 	public void register(DBConnectionPool pool) {
+		if (!SemanticQueryDatasourceCapabilities.supports(pool.getConnectionPoolType())) {
+			return;
+		}
 		poolMap.put(pool.getConnectionPoolType(), pool);
+		for (cn.lgs.semevosql.enums.BizDataSourceTypeEnum type : cn.lgs.semevosql.enums.BizDataSourceTypeEnum.values()) {
+			if (pool.supportedDataSourceType(type.getTypeName())) {
+				poolByDatasourceType.put(type.getTypeName().toLowerCase(java.util.Locale.ROOT), pool);
+			}
+		}
 	}
 
 	public boolean isRegistered(String type) {
@@ -47,20 +58,15 @@ public class DBConnectionPoolFactory {
 	 * @return DB connection pool
 	 */
 	public DBConnectionPool getPoolByType(String type) {
-		DBConnectionPool direct = poolMap.get(type);
-		if (direct != null) {
-			return direct;
-		}
-		return poolMap.values().stream().filter(p -> p.supportedDataSourceType(type)).findFirst().orElse(null);
+		return poolMap.get(type);
 	}
 
-	// todo: 写一层缓存
 	public DBConnectionPool getPoolByDbType(String type) {
-		return poolMap.values()
-			.stream()
-			.filter(p -> p.supportedDataSourceType(type))
-			.findFirst()
-			.orElseThrow(() -> new IllegalStateException("No DB connection pool found for type: " + type));
+		DBConnectionPool pool = type == null ? null : poolByDatasourceType.get(type.toLowerCase(java.util.Locale.ROOT));
+		if (pool == null) {
+			throw new IllegalStateException("No DB connection pool found for type: " + type);
+		}
+		return pool;
 	}
 
 }

@@ -32,6 +32,7 @@ import cn.lgs.semevosql.run.QueryRun;
 import cn.lgs.semevosql.run.QueryRun.RunStatus;
 import cn.lgs.semevosql.run.QueryRun.RunType;
 import cn.lgs.semevosql.run.QueryRunService;
+import cn.lgs.semevosql.run.LateRunResultDroppedException;
 import cn.lgs.semevosql.run.RunLeaseUnavailableException;
 import cn.lgs.semevosql.run.QueryRunService.CreateRunCommand;
 import cn.lgs.semevosql.semantic.domain.SemanticAssetStatus;
@@ -268,6 +269,7 @@ public class SemEvoSQLProductionService {
 		if (!existing.isEmpty()) {
 			return existing.get(0);
 		}
+		assertAttemptAcceptsRuntimeEffects(attemptId);
 		String id = id();
 		int inserted = jdbc.update("""
 				INSERT INTO qw_sql_trace
@@ -1125,6 +1127,7 @@ public class SemEvoSQLProductionService {
 		if (!existing.isEmpty()) {
 			return existing.get(0);
 		}
+		assertAttemptAcceptsRuntimeEffects(attemptId);
 		String id = id();
 		int inserted = jdbc.update("INSERT INTO " + table
 				+ "(id, attempt_id, idempotency_key, node_name, status, input_summary, output_summary, decision_summary, effect_summary, contribution_score, cost_json, result_proof_json, reused, correction_type, duration_ms, error_type, create_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) ON CONFLICT (attempt_id, idempotency_key) DO NOTHING",
@@ -1139,6 +1142,20 @@ public class SemEvoSQLProductionService {
 		}
 		return one("SELECT * FROM " + table + " WHERE attempt_id = ? AND idempotency_key = ?", attemptId,
 				request.idempotencyKey());
+	}
+
+	private void assertAttemptAcceptsRuntimeEffects(String attemptId) {
+		Integer writable = jdbc.queryForObject("""
+				SELECT COUNT(*)
+				FROM qw_attempt a
+				LEFT JOIN qw_query_run r ON r.run_id = a.run_id
+				WHERE a.id = ? AND a.status = 'RUNNING'
+				  AND (a.run_id IS NULL OR (r.status = 'RUNNING' AND r.attempt_id = a.id))
+				""", Integer.class, attemptId);
+		if (writable == null || writable != 1) {
+			throw new LateRunResultDroppedException(
+					"Attempt no longer accepts runtime effects: " + attemptId);
+		}
 	}
 
 	private Map<String, Object> episode(String id) {

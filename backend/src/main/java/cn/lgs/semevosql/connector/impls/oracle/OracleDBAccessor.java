@@ -19,12 +19,10 @@ import cn.lgs.semevosql.connector.accessor.AbstractAccessor;
 import cn.lgs.semevosql.connector.ddl.DdlFactory;
 import cn.lgs.semevosql.connector.pool.DBConnectionPoolFactory;
 import cn.lgs.semevosql.enums.BizDataSourceTypeEnum;
-import org.springframework.stereotype.Service;
 
 /**
  */
 
-@Service("oracleAccessor")
 public class OracleDBAccessor extends AbstractAccessor {
 
 	private final static String ACCESSOR_TYPE = "Oracle_Accessor";

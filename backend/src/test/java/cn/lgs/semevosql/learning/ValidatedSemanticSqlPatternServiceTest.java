@@ -17,6 +17,12 @@ package cn.lgs.semevosql.learning;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import cn.lgs.semevosql.semantic.domain.ComputationIntent;
+import cn.lgs.semevosql.semantic.domain.ComputationIntent.Capability;
+import cn.lgs.semevosql.semantic.domain.ComputationIntent.Requirement;
+import cn.lgs.semevosql.semantic.domain.SemanticBlueprint;
+import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class ValidatedSemanticSqlPatternServiceTest {
@@ -38,9 +44,42 @@ class ValidatedSemanticSqlPatternServiceTest {
 	}
 
 	@Test
+	void parameterizedComputationRequirementsPreventTopNShapeCollisions() {
+		ValidatedSemanticSqlPatternService service = new ValidatedSemanticSqlPatternService(null);
+		SemanticBlueprint top3 = advancedPlan(3, "HIGHEST");
+		SemanticBlueprint top10 = advancedPlan(10, "HIGHEST");
+		SemanticBlueprint bottom3 = advancedPlan(3, "LOWEST");
+		SemanticBlueprint top3DifferentRequirementOrder = advancedPlan(3, "HIGHEST");
+		top3DifferentRequirementOrder.setComputationIntent(new ComputationIntent(top3.getComputationIntent().capabilities(),
+				List.of(top3.getComputationIntent().requirements().get(2), top3.getComputationIntent().requirements().get(0),
+						top3.getComputationIntent().requirements().get(1))));
+
+		assertThat(service.computationShapeHash(top3)).isNotEqualTo(service.computationShapeHash(top10));
+		assertThat(service.computationShapeHash(top3)).isNotEqualTo(service.computationShapeHash(bottom3));
+		assertThat(service.computationShapeHash(top3)).isEqualTo(service.computationShapeHash(top3DifferentRequirementOrder));
+	}
+
+	@Test
 	void repeatedBadRecallQuarantinesPattern() {
 		assertThat(ValidatedSemanticSqlPatternService.shouldQuarantine(10, 1, 1)).isFalse();
 		assertThat(ValidatedSemanticSqlPatternService.shouldQuarantine(10, 2, 2)).isTrue();
 		assertThat(ValidatedSemanticSqlPatternService.shouldQuarantine(3, 3, 1)).isTrue();
+	}
+
+	private SemanticBlueprint advancedPlan(int limit, String rankingMode) {
+		return SemanticBlueprint.builder()
+			.models(List.of(SemanticBlueprint.ModelSelection.builder().modelCode("pay_order").build()))
+			.metrics(List.of(SemanticBlueprint.MetricSelection.builder()
+				.metricCode("paid_amount")
+				.modelCode("pay_order")
+				.build()))
+			.computationIntent(new ComputationIntent(Set.of(Capability.AGGREGATION, Capability.PERIOD_COMPARISON,
+					Capability.ORDERING, Capability.LIMIT), List.of(
+							new Requirement(Capability.PERIOD_COMPARISON, "paid_amount", "MONTH", "PREVIOUS_PERIOD_RATE", null,
+									null, null),
+							new Requirement(Capability.ORDERING, null, null, rankingMode, null, null, "PERIOD_COMPARISON"),
+							new Requirement(Capability.LIMIT, null, null, null, limit, "GLOBAL", "ORDERING"))))
+			.executable(true)
+			.build();
 	}
 }

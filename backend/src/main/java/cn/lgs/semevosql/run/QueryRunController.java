@@ -58,7 +58,7 @@ public class QueryRunController {
 
 	private final OperatorContext.Resolver operatorResolver;
 
-	private final RuntimeMutationAuthorizationService runtimeMutationAuthorizationService;
+	private final RuntimeMutationScopeService runtimeMutationScope;
 
 	@GetMapping("/{runId}")
 	public QueryRunPublicView get(@PathVariable String runId) {
@@ -89,7 +89,7 @@ public class QueryRunController {
 	public QueryRunPublicView cancel(@PathVariable String runId, @Valid @RequestBody RunCommandRequest request,
 			@RequestHeader HttpHeaders headers, Principal principal) {
 		OperatorContext operator = operatorResolver.resolve(headers, principal, "run-cancel:" + runId);
-		runtimeMutationAuthorizationService.requireRunOwnerOrAdmin(runId, operator);
+		runtimeMutationScope.requireRun(runId, operator);
 		QueryRun run = runService.cancel(runId, request.idempotencyKey());
 		if (run.status() == QueryRun.RunStatus.CANCEL_REQUESTED) {
 			recordSqlCancellation(runId, run.currentNode(), request.idempotencyKey());
@@ -130,7 +130,7 @@ public class QueryRunController {
 	public QueryRunPublicView resume(@PathVariable String runId, @Valid @RequestBody RunCommandRequest request,
 			@RequestHeader HttpHeaders headers, Principal principal) {
 		OperatorContext operator = operatorResolver.resolve(headers, principal, "run-resume:" + runId);
-		runtimeMutationAuthorizationService.requireRunOwnerOrAdmin(runId, operator);
+		runtimeMutationScope.requireRun(runId, operator);
 		return publicPresenter.present(runService.resume(runId, request.idempotencyKey()));
 	}
 

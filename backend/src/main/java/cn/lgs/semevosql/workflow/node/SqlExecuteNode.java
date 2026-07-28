@@ -350,7 +350,7 @@ public class SqlExecuteNode implements NodeAction {
 				result.put(LAST_SQL_RESULT_PAYLOAD, strResultJson);
 				SqlExecutionEffect effect = new SqlExecutionEffect(sqlQuery, strResultJson, updatedResults,
 						updatedQueries, resultMemory.flattened(), resultMemory.byStep(), currentStep + 1);
-				runNodeEffectService.recordCompleted(runId, effectKey, effectInputHash, writeSqlEffect(effect));
+				runNodeEffectService.recordCompleted(runId, attemptId, effectKey, effectInputHash, writeSqlEffect(effect));
 				resultSummary.put("decision", "PASS");
 				resultSummary.put("rowCount", resultData.size());
 				resultSummary.put("warnings", resultValidation.warnings());

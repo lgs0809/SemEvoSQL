@@ -16,10 +16,21 @@
 package cn.lgs.semevosql.evolution;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 class LowRiskSemanticEvolutionAutomationListenerTest {
 
@@ -53,6 +64,92 @@ class LowRiskSemanticEvolutionAutomationListenerTest {
 	}
 
 	@Test
+	void duplicateEventsCanResumeFromDurableIntermediateStates() {
+		for (String status : java.util.List.of("CANDIDATE", "APPROVED", "PATCH_APPLIED", "REPLAY_RUNNING",
+				"REPLAY_PASSED", "READY_FOR_PUBLISH", "PUBLISHED")) {
+			Map<String, Object> resumable = candidate("TERM_ALIAS_MISSING", "LOW", "STABLE_DOMINANT", 0.91, 3, 3);
+			resumable.put("status", status);
+			assertThat(listener.eligibleForRecovery(resumable)).as(status).isTrue();
+		}
+		Map<String, Object> failed = candidate("TERM_ALIAS_MISSING", "LOW", "STABLE_DOMINANT", 0.91, 3, 3);
+		failed.put("status", "REPLAY_FAILED");
+		assertThat(listener.eligibleForRecovery(failed)).isFalse();
+	}
+
+	@Test
+	void candidateEventAdvancesEachDurableStepExactlyOnce() {
+		JdbcTemplate jdbc = mock(JdbcTemplate.class);
+		SemanticEvolutionService service = mock(SemanticEvolutionService.class);
+		LowRiskSemanticEvolutionAutomationListener durableListener =
+				new LowRiskSemanticEvolutionAutomationListener(jdbc, service);
+		stubCandidateStates(jdbc, "CANDIDATE", "CANDIDATE", "APPROVED", "PATCH_APPLIED");
+
+		durableListener.onCandidate(new LowRiskSemanticEvolutionCandidateEvent("candidate-1"));
+
+		verify(service).review(eq("candidate-1"), any(SemanticEvolutionService.ReviewCommand.class),
+				any(cn.lgs.semevosql.common.OperatorContext.class));
+		verify(service).createDraft(eq("candidate-1"), any(SemanticEvolutionService.DraftCommand.class),
+				any(cn.lgs.semevosql.common.OperatorContext.class));
+		verify(service).startReplay(eq("candidate-1"), any(cn.lgs.semevosql.common.OperatorContext.class));
+	}
+
+	@Test
+	void replayedCandidateEventResumesAfterCrashWithoutRepeatingReview() {
+		JdbcTemplate jdbc = mock(JdbcTemplate.class);
+		SemanticEvolutionService service = mock(SemanticEvolutionService.class);
+		LowRiskSemanticEvolutionAutomationListener durableListener =
+				new LowRiskSemanticEvolutionAutomationListener(jdbc, service);
+		stubCandidateStates(jdbc, "APPROVED", "APPROVED", "PATCH_APPLIED");
+
+		durableListener.onCandidate(new LowRiskSemanticEvolutionCandidateEvent("candidate-1"));
+
+		verify(service, never()).review(anyString(), any(SemanticEvolutionService.ReviewCommand.class),
+				any(cn.lgs.semevosql.common.OperatorContext.class));
+		verify(service).createDraft(eq("candidate-1"), any(SemanticEvolutionService.DraftCommand.class),
+				any(cn.lgs.semevosql.common.OperatorContext.class));
+		verify(service).startReplay(eq("candidate-1"), any(cn.lgs.semevosql.common.OperatorContext.class));
+	}
+
+	@Test
+	void duplicateEventDuringReplayIsAnIdempotentNoOp() {
+		JdbcTemplate jdbc = mock(JdbcTemplate.class);
+		SemanticEvolutionService service = mock(SemanticEvolutionService.class);
+		LowRiskSemanticEvolutionAutomationListener durableListener =
+				new LowRiskSemanticEvolutionAutomationListener(jdbc, service);
+		stubCandidateStates(jdbc, "REPLAY_RUNNING", "REPLAY_RUNNING");
+
+		durableListener.onCandidate(new LowRiskSemanticEvolutionCandidateEvent("candidate-1"));
+
+		verifyNoInteractions(service);
+	}
+
+	@Test
+	void duplicateReplayPassedPublicationEventIsIdempotentAfterPublication() {
+		JdbcTemplate jdbc = mock(JdbcTemplate.class);
+		SemanticEvolutionService service = mock(SemanticEvolutionService.class);
+		LowRiskSemanticEvolutionAutomationListener durableListener =
+				new LowRiskSemanticEvolutionAutomationListener(jdbc, service);
+		stubCandidateStates(jdbc, "PUBLISHED");
+
+		durableListener.onReplayPassed(new LowRiskSemanticEvolutionReplayPassedEvent("candidate-1"));
+
+		verifyNoInteractions(service);
+	}
+
+	@Test
+	void replayPassedEventRequestsPublicationThroughTheNormalReleaseGate() {
+		JdbcTemplate jdbc = mock(JdbcTemplate.class);
+		SemanticEvolutionService service = mock(SemanticEvolutionService.class);
+		LowRiskSemanticEvolutionAutomationListener durableListener =
+				new LowRiskSemanticEvolutionAutomationListener(jdbc, service);
+		stubCandidateStates(jdbc, "REPLAY_PASSED");
+
+		durableListener.onReplayPassed(new LowRiskSemanticEvolutionReplayPassedEvent("candidate-1"));
+
+		verify(service).markReadyForPublish(eq("candidate-1"), any(cn.lgs.semevosql.common.OperatorContext.class));
+	}
+
+	@Test
 	void onlyReplayPassedLowRiskCandidateCanRequestPublication() {
 		Map<String, Object> passed = candidate("PROJECT_ALIAS_PROPOSAL", "LOW", "USER_CONFIRMED", 1.0, 1, 1);
 		passed.put("status", "REPLAY_PASSED");
@@ -75,5 +172,16 @@ class LowRiskSemanticEvolutionAutomationListenerTest {
 		value.put("distinct_root_evidence_count", roots);
 		value.put("semantic_change_set_id", "change-set-1");
 		return value;
+	}
+
+	private void stubCandidateStates(JdbcTemplate jdbc, String... statuses) {
+		AtomicInteger index = new AtomicInteger();
+		List<String> values = List.of(statuses);
+		when(jdbc.queryForList(anyString(), eq("candidate-1"))).thenAnswer(invocation -> {
+			String status = values.get(Math.min(index.getAndIncrement(), values.size() - 1));
+			Map<String, Object> state = candidate("TERM_ALIAS_MISSING", "LOW", "STABLE_DOMINANT", 0.91, 3, 3);
+			state.put("status", status);
+			return List.of(state);
+		});
 	}
 }

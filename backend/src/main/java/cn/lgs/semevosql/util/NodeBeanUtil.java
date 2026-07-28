@@ -15,6 +15,8 @@
  */
 package cn.lgs.semevosql.util;
 
+import cn.lgs.semevosql.run.RunExecutionFenceService;
+import cn.lgs.semevosql.run.RunExecutionFenceService.ExecutionToken;
 import com.alibaba.cloud.ai.graph.action.AsyncEdgeAction;
 import com.alibaba.cloud.ai.graph.action.AsyncNodeAction;
 import com.alibaba.cloud.ai.graph.action.EdgeAction;
@@ -34,8 +36,18 @@ public class NodeBeanUtil {
 
 	private final ApplicationContext context;
 
+	private final RunExecutionFenceService executionFence;
+
 	public <T extends NodeAction> NodeAction getNodeBean(Class<T> clazz) {
-		return context.getBean(clazz);
+		NodeAction delegate = context.getBean(clazz);
+		return state -> {
+			ExecutionToken token = executionFence.assertActive(state);
+			var result = delegate.apply(state);
+			// A blocking node may outlive Reactor cancellation. Re-check after it returns so its late output cannot
+			// advance the Graph or be rebound to a recovered attempt.
+			executionFence.assertActive(token);
+			return result;
+		};
 	}
 
 	public <T extends NodeAction> AsyncNodeAction getNodeBeanAsync(Class<T> clazz) {

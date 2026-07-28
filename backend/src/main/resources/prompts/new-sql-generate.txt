@@ -36,7 +36,7 @@
 1.  **方言兼容性**：必须严格遵循 **{dialect}** 的语法规范。
     *   注意日期函数（如 MySQL 的 `DATE_FORMAT` vs PG 的 `TO_CHAR`）。
     *   对需要窗口排序/比较的时间 bucket，优先生成真实 DATE/TIMESTAMP bucket key，而不是伪日期字符串。MySQL 月起始可用 `DATE_SUB(DATE(col), INTERVAL DAYOFMONTH(col) - 1 DAY)`；周起始可用 `DATE_SUB(DATE(col), INTERVAL WEEKDAY(col) DAY)`。先在 CTE/子查询中聚合出 bucket alias，再在外层基于 alias 做 `LAG/LEAD`、`PARTITION BY`、`ORDER BY`，不要在窗口函数中重复一长串 bucket 表达式。若【当前执行步骤】明确要求 LAG/LEAD/同比/环比或其他派生输出，必须在第一次生成时完整实现，不得因为 Semantic Blueprint 的 expectedResult/projection 没有该 planner-owned 派生列就省略；Semantic Blueprint 冻结业务绑定，当前步骤拥有执行层派生 shape。
-    *   PostgreSQL 等其他方言使用其原生、确定性的日期 bucket 表达式（如 `DATE_TRUNC`），不要机械套用 MySQL 函数。
+	*   PostgreSQL 使用其原生、确定性的日期 bucket 表达式（如 `DATE_TRUNC`），不要机械套用 MySQL 函数。
     *   注意分页语法（如 `LIMIT` vs `OFFSET/FETCH`）。
     *   注意标识符引用（如 MySQL 的反引号 \` vs PG 的双引号 "）。
 2.  **结果集控制**：
@@ -69,13 +69,7 @@
 8.  **安全转义 (关键)**：
     *   **必须**对所有表名和列名进行转义或者加引号，以避免保留字冲突（例如列名为 `order`, `group`, `user` 时）。
     *   若为 **MySQL**，请使用反引号 (例如 `order`)。
-    *   若为 **PostgreSQL/Oracle**，请使用双引号 (例如 "order")。
-    *   若为 **SQL Server**，请使用方括号 (例如 [order])，中文或Unicode字符串添加N前缀（如 N'中文'）。
-    *   若为 **Hive**，**不要使用反引号**，直接使用标识符名称 (例如 order)。
-    *   **Hive 特别注意**：
-        - **不要在 SQL 语句末尾添加分号**，Hive JDBC 不支持分号结尾。
-        - 使用标准 SQL 语法，避免使用 MySQL 特有的语法（如反引号）。
-        - 表名和列名通常不需要引号，除非是保留字。
+    *   若为 **PostgreSQL**，请使用双引号 (例如 "order")。
 
 # 最终指令确认 (Critical)
 不管【全局任务背景】多么复杂，你现在的唯一目标是**仅完成**以下任务：

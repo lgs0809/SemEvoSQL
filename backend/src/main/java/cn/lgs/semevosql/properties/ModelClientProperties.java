@@ -43,4 +43,7 @@ public class ModelClientProperties {
 	/** Default request timeout when a persisted model configuration does not override it. */
 	private Duration requestTimeout = Duration.ofSeconds(60);
 
+	/** How long a successful connectivity validation may be treated as current readiness evidence. */
+	private Duration validationFreshness = Duration.ofHours(6);
+
 }

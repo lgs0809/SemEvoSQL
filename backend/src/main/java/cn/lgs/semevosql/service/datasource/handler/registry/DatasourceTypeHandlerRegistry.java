@@ -15,6 +15,7 @@
  */
 package cn.lgs.semevosql.service.datasource.handler.registry;
 
+import cn.lgs.semevosql.service.datasource.SemanticQueryDatasourceCapabilities;
 import cn.lgs.semevosql.service.datasource.handler.DatasourceTypeHandler;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -34,6 +35,9 @@ public class DatasourceTypeHandlerRegistry {
 	}
 
 	public void register(DatasourceTypeHandler handler) {
+		if (!SemanticQueryDatasourceCapabilities.supports(handler.typeName())) {
+			return;
+		}
 		handlerMap.put(normalizeType(handler.typeName()), handler);
 	}
 

@@ -32,6 +32,8 @@ public class RunNodeEffectService {
 
 	private final RunNodeEffectRepository repository;
 
+	private final RunExecutionFenceService executionFence;
+
 	public Optional<String> completedPayload(String runId, String nodeKey, String inputHash) {
 		if (runId == null || runId.isBlank()) {
 			return Optional.empty();
@@ -41,8 +43,16 @@ public class RunNodeEffectService {
 
 	@Transactional
 	public void recordCompleted(String runId, String nodeKey, String inputHash, String resultJson) {
+		recordCompleted(runId, null, nodeKey, inputHash, resultJson);
+	}
+
+	@Transactional
+	public void recordCompleted(String runId, String attemptId, String nodeKey, String inputHash, String resultJson) {
 		if (runId == null || runId.isBlank()) {
 			return;
+		}
+		if (attemptId != null && !attemptId.isBlank()) {
+			executionFence.assertActive(runId, attemptId);
 		}
 		repository.lockRun(runId);
 		RunNodeEffect existing = repository.find(runId, nodeKey).orElse(null);

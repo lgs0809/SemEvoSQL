@@ -41,6 +41,9 @@ public final class Constant {
 
 	public static final String RUN_ID = "runId";
 
+	/** Absolute wall-clock deadline for the currently bound durable execution attempt. */
+	public static final String RUN_DEADLINE_EPOCH_MILLIS = "runDeadlineEpochMillis";
+
 	public static final String DATASOURCE_ID = "datasourceId";
 
 	public static final String FORCED_DATASOURCE_ID = "forcedDatasourceId";

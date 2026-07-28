@@ -56,22 +56,16 @@ public class LowRiskSemanticEvolutionAutomationListener {
 			return;
 		}
 		Map<String, Object> candidate = candidate(event.candidateId());
-		if (!eligibleForAutomation(candidate)) {
+		if (!eligibleForRecovery(candidate)) {
 			return;
 		}
 		try {
-			OperatorContext review = OperatorContext.system("auto-low-risk-review:" + event.candidateId());
-			evolutionService.review(event.candidateId(),
-					new ReviewCommand(true, review.operator(), "Low-risk semantic change passed automatic trust gates"), review);
-			OperatorContext draft = OperatorContext.system("auto-low-risk-draft:" + event.candidateId());
-			evolutionService.createDraft(event.candidateId(), new DraftCommand("automatic-change-set"), draft);
-			OperatorContext replay = OperatorContext.system("auto-low-risk-replay:" + event.candidateId());
-			evolutionService.startReplay(event.candidateId(), replay);
+			advanceToReplay(event.candidateId());
 		}
 		catch (RuntimeException failure) {
-			// Automation is fail-closed. The durable Candidate remains visible for manual recovery.
-			log.warn("Low-risk semantic evolution automation stopped for candidate {}: {}", event.candidateId(),
-					failure.getMessage());
+			// Every step is durable and idempotent. A duplicate/replayed event resumes from the persisted status.
+			log.warn("Low-risk semantic evolution automation stopped for candidate {} at durable status {}: {}",
+					event.candidateId(), text(candidate(event.candidateId()).get("status")), failure.getMessage());
 		}
 	}
 
@@ -95,17 +89,57 @@ public class LowRiskSemanticEvolutionAutomationListener {
 		}
 	}
 
+	private void advanceToReplay(String candidateId) {
+		for (int step = 0; step < 4; step++) {
+			Map<String, Object> current = candidate(candidateId);
+			if (!trustedLowRiskAsset(current)) {
+				return;
+			}
+			switch (text(current.get("status"))) {
+				case "CANDIDATE" -> {
+					OperatorContext review = OperatorContext.system("auto-low-risk-review:" + candidateId);
+					evolutionService.review(candidateId,
+							new ReviewCommand(true, review.operator(),
+									"Low-risk semantic change passed automatic trust gates"),
+							review);
+				}
+				case "APPROVED" -> evolutionService.createDraft(candidateId, new DraftCommand("automatic-change-set"),
+						OperatorContext.system("auto-low-risk-draft:" + candidateId));
+				case "PATCH_APPLIED" -> {
+					evolutionService.startReplay(candidateId,
+							OperatorContext.system("auto-low-risk-replay:" + candidateId));
+					return;
+				}
+				case "REPLAY_RUNNING", "REPLAY_PASSED", "READY_FOR_PUBLISH", "PUBLISHED" -> {
+					return;
+				}
+				default -> {
+					return;
+				}
+			}
+		}
+	}
+
 	boolean eligibleForAutomation(Map<String, Object> candidate) {
-		if (candidate == null || candidate.isEmpty() || !"CANDIDATE".equals(text(candidate.get("status")))
-				|| !"LOW".equals(text(candidate.get("risk_level")))
+		return candidate != null && "CANDIDATE".equals(text(candidate.get("status"))) && trustedLowRiskAsset(candidate);
+	}
+
+	boolean eligibleForRecovery(Map<String, Object> candidate) {
+		if (!trustedLowRiskAsset(candidate)) {
+			return false;
+		}
+		return Set.of("CANDIDATE", "APPROVED", "PATCH_APPLIED", "REPLAY_RUNNING", "REPLAY_PASSED",
+				"READY_FOR_PUBLISH", "PUBLISHED").contains(text(candidate.get("status")));
+	}
+
+	private boolean trustedLowRiskAsset(Map<String, Object> candidate) {
+		if (candidate == null || candidate.isEmpty() || !"LOW".equals(text(candidate.get("risk_level")))
 				|| !AUTO_TYPES.contains(text(candidate.get("candidate_type")))) {
 			return false;
 		}
 		String classification = text(candidate.get("mapping_classification"));
-		if ("TRUE_AMBIGUITY".equals(classification)) {
-			return false;
-		}
-		if (!StringUtils.hasText(text(candidate.get("semantic_change_set_id")))) {
+		if ("TRUE_AMBIGUITY".equals(classification)
+				|| !StringUtils.hasText(text(candidate.get("semantic_change_set_id")))) {
 			return false;
 		}
 		if ("PROJECT_ALIAS_PROPOSAL".equals(text(candidate.get("candidate_type")))) {

@@ -19,12 +19,10 @@ import cn.lgs.semevosql.connector.accessor.AbstractAccessor;
 import cn.lgs.semevosql.connector.ddl.DdlFactory;
 import cn.lgs.semevosql.connector.pool.DBConnectionPoolFactory;
 import cn.lgs.semevosql.enums.BizDataSourceTypeEnum;
-import org.springframework.stereotype.Service;
 
 /**
  * Hive 数据源访问器实现
  */
-@Service("hiveAccessor")
 public class HiveDBAccessor extends AbstractAccessor {
 
 	private final static String ACCESSOR_TYPE = "Hive_Accessor";

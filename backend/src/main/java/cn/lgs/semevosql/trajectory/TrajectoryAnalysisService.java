@@ -34,6 +34,7 @@ import cn.lgs.semevosql.evolution.application.LegacyEvolutionChangeSetBridge;
 import cn.lgs.semevosql.multisource.MultiSourcePolicyService;
 import cn.lgs.semevosql.run.ExecutionSnapshot;
 import cn.lgs.semevosql.run.ExecutionSnapshotService;
+import cn.lgs.semevosql.run.SemanticPlanSnapshotService;
 import cn.lgs.semevosql.semantic.application.SemanticCatalogPatchAnalyzer;
 import cn.lgs.semevosql.semantic.domain.SemanticAssetProvenance.AssetType;
 import cn.lgs.semevosql.semantic.domain.SemanticCatalogRepository;
@@ -83,6 +84,10 @@ public class TrajectoryAnalysisService {
 	private final JdbcTemplate jdbc;
 
 	private final ExecutionSnapshotService executionSnapshotService;
+
+	private final SemanticPlanSnapshotService semanticPlanSnapshots;
+
+	private final TrajectoryPathProfileService pathProfileService;
 
 	private final SemanticCatalogRepository catalogRepository;
 
@@ -215,7 +220,7 @@ public class TrajectoryAnalysisService {
 
 	@Transactional
 	public Map<String, Object> recomputePattern(String patternId) {
-		recomputeProfile(patternId);
+		pathProfileService.recompute(patternId);
 		refreshDetourRecurrence(patternId);
 		generateCandidates(patternId);
 		return pattern(patternId);
@@ -309,7 +314,7 @@ public class TrajectoryAnalysisService {
 				json(cost), json(proof));
 		detectDetours(projectId, projectVersionId, patternId, pathId, nodes, sqlTraces, clarifications, sources, merges,
 				retries, runId, normalizedQuestion, postExecutionReviews);
-		recomputeProfile(patternId);
+		pathProfileService.recompute(patternId);
 		refreshDetourRecurrence(patternId);
 		generateCandidates(patternId);
 		return one("SELECT * FROM qw_trajectory_path WHERE id = ?", pathId);
@@ -375,6 +380,10 @@ public class TrajectoryAnalysisService {
 						.toList()));
 			shape.put("rules",
 					sorted(plan.getRules().stream().map(SemanticBlueprint.RuleSelection::getRuleCode).toList()));
+			shape.put("computationCapabilities", plan.getComputationIntent() == null ? List.of()
+					: plan.getComputationIntent().capabilities().stream().map(Enum::name).sorted().toList());
+			shape.put("computationRequirements", plan.getComputationIntent() == null ? List.of()
+					: plan.getComputationIntent().canonicalRequirements());
 			shape.put("groupBy", plan.getGroupBy().stream()
 				.map(group -> Map.of("modelCode", Objects.toString(group.getModelCode(), ""), "columnName",
 						Objects.toString(group.getColumnName(), ""), "alias", Objects.toString(group.getAlias(), ""),
@@ -412,95 +421,6 @@ public class TrajectoryAnalysisService {
 		String shapeHash = hash(json(shape));
 		String instanceHash = hash(json(Map.of("shapeHash", shapeHash, "normalizedQuestion", normalized)));
 		return new PatternShape(intent, shapeHash, instanceHash, ambiguity, risk, Map.copyOf(shape));
-	}
-
-	private void recomputeProfile(String patternId) {
-		Map<String, Object> pattern = one("SELECT * FROM qw_query_pattern WHERE id = ?", patternId);
-		List<Map<String, Object>> aggregates = jdbc.queryForList("""
-				SELECT path_signature, execution_compatibility_hash, COUNT(*) sample_count,
-				 SUM(CASE WHEN status = 'SUCCEEDED' THEN 1 ELSE 0 END) success_count,
-				 AVG(correctness_score) correctness_rate, AVG(safety_score) safety_rate,
-				 AVG(coverage_score) coverage_rate, AVG(freshness_score) freshness_rate,
-				 AVG(stability_score) stability_rate, AVG(COALESCE(latency_ms, 0)) avg_latency_ms,
-				 AVG(COALESCE(token_count, 0)) avg_token_count, AVG(retry_count) avg_retry_count,
-				 AVG(clarification_count) avg_clarification_count
-				FROM qw_trajectory_path WHERE pattern_id = ?
-				GROUP BY path_signature, execution_compatibility_hash
-				""", patternId);
-		for (Map<String, Object> aggregate : aggregates) {
-			Optional<Map<String, Object>> existing = optional("""
-					SELECT * FROM qw_query_path_profile
-					WHERE pattern_id = ? AND execution_compatibility_hash = ? AND path_signature = ?
-					""", patternId, aggregate.get("execution_compatibility_hash"), aggregate.get("path_signature"));
-			if (existing.isPresent()) {
-				jdbc.update("""
-						UPDATE qw_query_path_profile SET sample_count = ?, success_count = ?, correctness_rate = ?,
-						 safety_rate = ?, coverage_rate = ?, freshness_rate = ?, stability_rate = ?, avg_latency_ms = ?,
-						 avg_token_count = ?, avg_retry_count = ?, avg_clarification_count = ?,
-						 last_evaluated_time = CURRENT_TIMESTAMP, update_time = CURRENT_TIMESTAMP WHERE id = ?
-						""", aggregate.get("sample_count"), aggregate.get("success_count"),
-						aggregate.get("correctness_rate"), aggregate.get("safety_rate"), aggregate.get("coverage_rate"),
-						aggregate.get("freshness_rate"), aggregate.get("stability_rate"),
-						aggregate.get("avg_latency_ms"), aggregate.get("avg_token_count"),
-						aggregate.get("avg_retry_count"), aggregate.get("avg_clarification_count"),
-						existing.orElseThrow().get("id"));
-			}
-			else {
-				jdbc.update("""
-						INSERT INTO qw_query_path_profile
-						(id, project_id, project_version_id, pattern_id, execution_compatibility_hash, path_signature,
-						 sample_count, success_count, correctness_rate, safety_rate, coverage_rate, freshness_rate,
-						 stability_rate, avg_latency_ms, avg_token_count, avg_retry_count, avg_clarification_count,
-						 dominated, pareto_rank, status, last_evaluated_time, create_time, update_time)
-						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, FALSE, 0, 'OBSERVE_ONLY',
-						 CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-						""", UUID.randomUUID().toString(), pattern.get("project_id"), pattern.get("project_version_id"),
-						patternId, aggregate.get("execution_compatibility_hash"), aggregate.get("path_signature"),
-						aggregate.get("sample_count"), aggregate.get("success_count"),
-						aggregate.get("correctness_rate"), aggregate.get("safety_rate"), aggregate.get("coverage_rate"),
-						aggregate.get("freshness_rate"), aggregate.get("stability_rate"),
-						aggregate.get("avg_latency_ms"), aggregate.get("avg_token_count"),
-						aggregate.get("avg_retry_count"), aggregate.get("avg_clarification_count"));
-			}
-		}
-		markPareto(patternId);
-	}
-
-	private void markPareto(String patternId) {
-		List<Map<String, Object>> profiles = jdbc
-			.queryForList("SELECT * FROM qw_query_path_profile WHERE pattern_id = ?", patternId);
-		for (Map<String, Object> candidate : profiles) {
-			boolean dominated = profiles.stream().anyMatch(other -> other != candidate && dominates(other, candidate));
-			int rank = dominated ? 1
-					+ (int) profiles.stream().filter(other -> other != candidate && dominates(other, candidate)).count()
-					: 0;
-			jdbc.update("""
-					UPDATE qw_query_path_profile SET dominated = ?, pareto_rank = ?,
-					 last_evaluated_time = CURRENT_TIMESTAMP, update_time = CURRENT_TIMESTAMP WHERE id = ?
-					""", dominated, rank, candidate.get("id"));
-		}
-	}
-
-	private boolean dominates(Map<String, Object> left, Map<String, Object> right) {
-		boolean quality = decimal(left, "correctness_rate") >= decimal(right, "correctness_rate")
-				&& decimal(left, "safety_rate") >= decimal(right, "safety_rate")
-				&& decimal(left, "coverage_rate") >= decimal(right, "coverage_rate")
-				&& decimal(left, "freshness_rate") >= decimal(right, "freshness_rate")
-				&& decimal(left, "stability_rate") >= decimal(right, "stability_rate");
-		boolean cost = decimal(left, "avg_latency_ms") <= decimal(right, "avg_latency_ms")
-				&& decimal(left, "avg_token_count") <= decimal(right, "avg_token_count")
-				&& decimal(left, "avg_retry_count") <= decimal(right, "avg_retry_count")
-				&& decimal(left, "avg_clarification_count") <= decimal(right, "avg_clarification_count");
-		boolean strict = decimal(left, "correctness_rate") > decimal(right, "correctness_rate")
-				|| decimal(left, "safety_rate") > decimal(right, "safety_rate")
-				|| decimal(left, "coverage_rate") > decimal(right, "coverage_rate")
-				|| decimal(left, "freshness_rate") > decimal(right, "freshness_rate")
-				|| decimal(left, "stability_rate") > decimal(right, "stability_rate")
-				|| decimal(left, "avg_latency_ms") < decimal(right, "avg_latency_ms")
-				|| decimal(left, "avg_token_count") < decimal(right, "avg_token_count")
-				|| decimal(left, "avg_retry_count") < decimal(right, "avg_retry_count")
-				|| decimal(left, "avg_clarification_count") < decimal(right, "avg_clarification_count");
-		return quality && cost && strict;
 	}
 
 	private void detectDetours(Long projectId, Long versionId, String patternId, String pathId,
@@ -1281,31 +1201,19 @@ public class TrajectoryAnalysisService {
 	private SnapshotView snapshot(Map<String, Object> run, String catalogHash, Long versionId) {
 		String runId = text(run.get("run_id"));
 		String compatibilityHash = hash("legacy:" + versionId + ":" + catalogHash);
-		SemanticBlueprint plan = null;
+		SemanticBlueprint plan = semanticPlanSnapshots.latest(runId).orElse(null);
 		String json = text(run.get("execution_snapshot"));
 		if (StringUtils.hasText(json)) {
 			try {
 				Optional<ExecutionSnapshot> snapshot = executionSnapshotService.readTyped(json);
 				if (snapshot.isPresent()) {
 					compatibilityHash = snapshot.orElseThrow().compatibilityHash();
-					plan = snapshot.orElseThrow().semanticPlan();
 				}
 			}
 			catch (RuntimeException ex) {
 				log.warn("Ignoring unreadable execution snapshot during trajectory analysis for run {}: {}", runId,
 						ex.getMessage());
 			}
-		}
-		if (plan == null && StringUtils.hasText(runId)) {
-			plan = jdbc.query("""
-					SELECT payload FROM qw_run_event
-					WHERE run_id = ? AND event_type = 'SEMANTIC_PLAN_SNAPSHOT'
-					ORDER BY sequence DESC LIMIT 1
-					""", (rs, rowNum) -> decodeSemanticPlanSnapshot(rs.getString("payload")).orElse(null), runId)
-				.stream()
-				.filter(Objects::nonNull)
-				.findFirst()
-				.orElse(null);
 		}
 		return new SnapshotView(compatibilityHash, plan);
 	}

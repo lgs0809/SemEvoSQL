@@ -15,9 +15,8 @@
  */
 package cn.lgs.semevosql.learning;
 
-import cn.lgs.semevosql.common.OperatorAuthorizationService;
+import cn.lgs.semevosql.common.LocalOperatorService;
 import cn.lgs.semevosql.common.OperatorContext;
-import cn.lgs.semevosql.common.OperatorRole;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -39,10 +38,10 @@ public class QueryCaseQuarantineService {
 
 	private final QueryCaseGovernanceProperties properties;
 
-	private final OperatorAuthorizationService authorization;
+	private final LocalOperatorService authorization;
 
 	public QueryCaseQuarantineService(JdbcTemplate jdbc, QueryCaseRepository repository, QueryCaseLineageService events,
-			QueryCaseGovernanceProperties properties, OperatorAuthorizationService authorization) {
+			QueryCaseGovernanceProperties properties, LocalOperatorService authorization) {
 		this.jdbc = jdbc;
 		this.repository = repository;
 		this.events = events;
@@ -96,7 +95,7 @@ public class QueryCaseQuarantineService {
 				|| operator == null) {
 			throw new IllegalArgumentException("projectId, queryCaseId, reason and operator are required");
 		}
-		authorization.requireAtLeast(operator, OperatorRole.REVIEWER, "quarantine approved Query Case");
+		authorization.require(operator, "quarantine approved Query Case");
 		repository.require(projectId, queryCaseId);
 		int updated = jdbc.update("""
 				UPDATE qw_query_example
@@ -111,7 +110,7 @@ public class QueryCaseQuarantineService {
 		events.appendEvent(queryCaseId, "QUERY_CASE_MANUALLY_QUARANTINED", "APPROVED", "QUARANTINED",
 				operator.operator(), operator.source(),
 				Map.of("reason", reason.trim(), "requestId", operator.requestId(), "idempotencyKey",
-						operator.idempotencyKey(), "role", operator.role().name()));
+						operator.idempotencyKey(), "actorMode", "LOCAL_OPERATOR"));
 		return repository.get(projectId, queryCaseId);
 	}
 
@@ -131,7 +130,7 @@ public class QueryCaseQuarantineService {
 				|| operator == null) {
 			throw new IllegalArgumentException("projectId, queryCaseId, reason and operator are required");
 		}
-		authorization.requireAtLeast(operator, OperatorRole.REVIEWER, "govern quarantined Query Case");
+		authorization.require(operator, "govern quarantined Query Case");
 		repository.require(projectId, queryCaseId);
 		int updated = jdbc.update("""
 				UPDATE qw_query_example
@@ -147,7 +146,7 @@ public class QueryCaseQuarantineService {
 		}
 		events.appendEvent(queryCaseId, eventType, "QUARANTINED", targetStatus, operator.operator(), operator.source(),
 				Map.of("reason", reason.trim(), "requestId", operator.requestId(), "idempotencyKey",
-						operator.idempotencyKey(), "role", operator.role().name()));
+						operator.idempotencyKey(), "actorMode", "LOCAL_OPERATOR"));
 		return repository.get(projectId, queryCaseId);
 	}
 

@@ -17,7 +17,6 @@ package cn.lgs.semevosql.evolution;
 
 import cn.lgs.semevosql.connector.JdbcStatementCancellationRegistry;
 import cn.lgs.semevosql.common.OperatorContext;
-import cn.lgs.semevosql.common.OperatorRole;
 import cn.lgs.semevosql.common.json.JsonPayloadRegistry;
 import cn.lgs.semevosql.common.json.VersionedJson;
 import cn.lgs.semevosql.evolution.SemanticEvolutionStateMachine.CandidateStatus;
@@ -279,7 +278,7 @@ public class SemanticReplayCoordinator {
 					"replay-succeeded:" + jobId);
 			Map<String, Object> candidate = one("SELECT * FROM qw_semantic_evolution_candidate WHERE id = ?",
 					text(job.get("candidate_id")));
-			OperatorContext system = new OperatorContext("semevosql-system", OperatorRole.ADMIN, "RECOVERY_WORKER",
+			OperatorContext system = new OperatorContext("semevosql-system", "RECOVERY_WORKER",
 					runId, "semantic-replay-complete:" + jobId);
 			String candidateId = text(job.get("candidate_id"));
 			auditService.append(candidateId, "REPLAY_COMPLETED", "REPLAY_RUNNING",

@@ -17,8 +17,7 @@ package cn.lgs.semevosql.external.mcp;
 
 import cn.lgs.semevosql.common.OperatorContext;
 import cn.lgs.semevosql.project.application.ProjectRuntimeGate;
-import cn.lgs.semevosql.project.security.ProjectAccessRole;
-import cn.lgs.semevosql.project.security.ProjectAccessService;
+import cn.lgs.semevosql.project.application.ProjectScopeService;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.Base64;
@@ -34,7 +33,7 @@ public class ProjectMcpDeploymentService {
 
     private final ProjectMcpRepository repository;
 
-    private final ProjectAccessService accessService;
+    private final ProjectScopeService projectScope;
 
     private final ProjectRuntimeGate runtimeGate;
 
@@ -44,7 +43,7 @@ public class ProjectMcpDeploymentService {
 
     @Transactional
     public DeploymentCredential deploy(Long projectId, OperatorContext operator) {
-        accessService.requireAccess(projectId, operator, ProjectAccessRole.OWNER);
+        projectScope.requireProject(projectId, operator);
         runtimeGate.requireReadyByProject(projectId);
         ProjectMcpDeployment existing = repository.findDeploymentByProject(projectId).orElse(null);
         if (existing != null && existing.status() != ProjectMcpDeployment.Status.REVOKED) {
@@ -64,14 +63,13 @@ public class ProjectMcpDeploymentService {
             deployment = repository.findDeployment(existing.deploymentId()).orElseThrow();
         }
 
-        accessService.grant(projectId, deployment.principalId(), ProjectAccessRole.VIEWER, operator);
         String token = issueCredential(deployment.deploymentId());
         repository.audit(deployment.deploymentId(), projectId, deployment.principalId(), "DEPLOY", "SUCCEEDED", null);
         return credentialResponse(repository.findDeployment(deployment.deploymentId()).orElseThrow(), token);
     }
 
     public ProjectMcpDeployment get(Long projectId, OperatorContext operator) {
-        accessService.requireAccess(projectId, operator, ProjectAccessRole.VIEWER);
+        projectScope.requireProject(projectId, operator);
         return repository.findDeploymentByProject(projectId).orElse(null);
     }
 
@@ -113,7 +111,6 @@ public class ProjectMcpDeploymentService {
         ProjectMcpDeployment deployment = requireManaged(projectId, operator);
         repository.revokeCredentials(deployment.deploymentId());
         repository.updateStatus(deployment.deploymentId(), ProjectMcpDeployment.Status.REVOKED);
-        accessService.revoke(projectId, deployment.principalId(), operator);
         repository.audit(deployment.deploymentId(), projectId, deployment.principalId(), "REVOKE", "SUCCEEDED", null);
     }
 
@@ -136,8 +133,6 @@ public class ProjectMcpDeploymentService {
         for (ProjectMcpDeployment deployment : repository.runningDeployments()) {
             try {
                 runtimeGate.requireReadyByProject(deployment.projectId());
-                OperatorContext system = OperatorContext.system("mcp-recovery:" + deployment.deploymentId());
-                accessService.grant(deployment.projectId(), deployment.principalId(), ProjectAccessRole.VIEWER, system);
                 repository.updateStatus(deployment.deploymentId(), ProjectMcpDeployment.Status.RUNNING);
                 repository.markRecovered(deployment.deploymentId());
                 repository.audit(deployment.deploymentId(), deployment.projectId(), deployment.principalId(), "RECOVER",
@@ -152,7 +147,7 @@ public class ProjectMcpDeploymentService {
     }
 
     private ProjectMcpDeployment requireManaged(Long projectId, OperatorContext operator) {
-        accessService.requireAccess(projectId, operator, ProjectAccessRole.OWNER);
+        projectScope.requireProject(projectId, operator);
         return repository.findDeploymentByProject(projectId)
             .orElseThrow(() -> new IllegalArgumentException("Project MCP deployment does not exist"));
     }

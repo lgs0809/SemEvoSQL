@@ -36,13 +36,13 @@ class GlobalExceptionHandlerSafetyTest {
 	}
 
 	@Test
-	void securityExceptionDoesNotExposePrincipalOrRoleMapping() {
+	void governedOperationExceptionDoesNotExposeInternalStateDetails() {
 		ApiResponse<Object> response = handler
-			.handleSecurityException(new SecurityException("Authenticated operator alice has no server-side role mapping"));
+			.handleSecurityException(new SecurityException("Local operation is not allowed in the current governed state"));
 
 		assertThat(response.getErrorCode()).isEqualTo(ApiErrorCode.FORBIDDEN);
 		assertThat(response.getMessage()).isEqualTo("当前操作没有足够权限。");
-		assertThat(response.getMessage()).doesNotContain("alice", "role mapping");
+		assertThat(response.getMessage()).doesNotContain("governed state", "Local operation");
 	}
 
 	@Test

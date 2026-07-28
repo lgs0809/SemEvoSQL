@@ -73,11 +73,7 @@ public class SemanticSqlCompiler {
 			throw new IllegalArgumentException(
 					"Semantic Blueprint is not executable: " + String.join("; ", plan.getValidationErrors()));
 		}
-		assertDeterministicCapability(plan);
-		if (plan.getProjections() == null || plan.getProjections().isEmpty()) {
-			throw new ConstrainedGenerationRequiredException(
-					"No governed projection is available for deterministic SQL");
-		}
+		assertDeterministicCapability(plan, catalog, dialects);
 		CompileContext context = context(plan, catalog);
 		List<SemanticBlueprint.SourceSubPlan> sources = sourcePlans(plan, context);
 		if (sources.isEmpty()) {
@@ -109,7 +105,7 @@ public class SemanticSqlCompiler {
 			throw new IllegalArgumentException(
 					"Semantic Blueprint is not executable: " + String.join("; ", plan.getValidationErrors()));
 		}
-		assertDeterministicCapability(plan);
+		assertDeterministicCapability(plan, catalog, Map.of(datasourceId, dialect));
 		CompileContext context = context(plan, catalog);
 		SemanticBlueprint.SourceSubPlan source = sourcePlans(plan, context).stream()
 			.filter(candidate -> Objects.equals(candidate.getDatasourceId(), datasourceId))
@@ -120,8 +116,9 @@ public class SemanticSqlCompiler {
 				defaultZone == null ? ZoneId.systemDefault() : defaultZone);
 	}
 
-	private void assertDeterministicCapability(SemanticBlueprint plan) {
-		LoweringCapabilityProbe.Decision decision = LoweringCapabilityProbe.probe(plan);
+	private void assertDeterministicCapability(SemanticBlueprint plan, SemanticCatalogSnapshot catalog,
+			Map<Integer, SqlDialect> dialects) {
+		LoweringCapabilityProbe.Decision decision = LoweringCapabilityProbe.probe(plan, catalog, dialects);
 		if (decision.status() == LoweringCapabilityProbe.Status.INVALID) {
 			throw new IllegalArgumentException(decision.reason());
 		}

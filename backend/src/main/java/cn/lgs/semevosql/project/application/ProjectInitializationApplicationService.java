@@ -16,9 +16,8 @@
 package cn.lgs.semevosql.project.application;
 
 import cn.lgs.semevosql.clarification.ProjectSemanticAliasService;
-import cn.lgs.semevosql.common.OperatorAuthorizationService;
+import cn.lgs.semevosql.common.LocalOperatorService;
 import cn.lgs.semevosql.common.OperatorContext;
-import cn.lgs.semevosql.common.OperatorRole;
 import cn.lgs.semevosql.evolution.ProjectVersionPublishedEvent;
 import cn.lgs.semevosql.project.domain.InitializationAnalysisStatus;
 import cn.lgs.semevosql.project.domain.ProjectVersionCatalogCloner;
@@ -34,7 +33,6 @@ import cn.lgs.semevosql.project.domain.SemanticProject;
 import cn.lgs.semevosql.project.domain.SemanticProjectRepository;
 import cn.lgs.semevosql.project.application.ProjectVersionActivityService.ActivityType;
 import cn.lgs.semevosql.project.domain.SemanticProjectVersion;
-import cn.lgs.semevosql.project.security.ProjectAccessService;
 import cn.lgs.semevosql.semantic.application.ProjectDocumentService;
 import cn.lgs.semevosql.semantic.retrieval.SemanticRetrievalDocumentBuildService;
 import cn.lgs.semevosql.util.JsonUtil;
@@ -76,11 +74,9 @@ public class ProjectInitializationApplicationService implements ApplicationEvent
 
 	private final SemanticRetrievalDocumentBuildService semanticRetrievalDocumentBuildService;
 
-	private final ProjectAccessService projectAccessService;
-
 	private final ProjectVersionActivityService versionActivityService;
 
-	private final OperatorAuthorizationService authorization;
+	private final LocalOperatorService authorization;
 
 	private ApplicationEventPublisher eventPublisher;
 
@@ -100,11 +96,10 @@ public class ProjectInitializationApplicationService implements ApplicationEvent
 	public ProjectInitializationView createProject(String projectCode, String name, String businessDomain,
 			String description, String firstVersionNumber, String source,
 			List<ProjectDatasourceBindingService.BindingDefinition> datasourceBindings, OperatorContext operator) {
-		authorization.requireAtLeast(operator, OperatorRole.EDITOR, "create Project");
+		authorization.require(operator, "create Project");
 		SemanticProject project = SemanticProject.initialize(projectCode, name, businessDomain, description,
 				operator.operator());
 		repository.insertProject(project);
-		projectAccessService.grantOwner(project.getId(), operator);
 		runtimeProfileService.resolveOrCreate(project);
 		SemanticProjectVersion version = SemanticProjectVersion.firstDraft(project.getId(), firstVersionNumber, source);
 		repository.insertVersion(version);
@@ -113,12 +108,8 @@ public class ProjectInitializationApplicationService implements ApplicationEvent
 	}
 
 	public List<SemanticProject> listProjects(OperatorContext operator) {
-		List<SemanticProject> projects = repository.findProjects();
-		if (projectAccessService.isGlobalAdmin(operator)) {
-			return projects;
-		}
-		Set<Long> accessible = projectAccessService.accessibleProjectIds(operator);
-		return projects.stream().filter(project -> accessible.contains(project.getId())).toList();
+		authorization.require(operator, "list local Projects");
+		return repository.findProjects();
 	}
 
 	public List<SemanticProjectVersion> listVersions(Long projectId) {
@@ -133,7 +124,7 @@ public class ProjectInitializationApplicationService implements ApplicationEvent
 	@Transactional
 	public ProjectInitializationView createDraftVersion(Long projectId, String versionNumber,
 			ProjectVersionCreationMode creationMode, Long parentVersionId, String source, OperatorContext operator) {
-		authorization.requireAtLeast(operator, OperatorRole.EDITOR, "create Project Version draft");
+		authorization.require(operator, "create Project Version draft");
 		SemanticProject project = requireProject(projectId);
 		if (repository.findVersionByNumber(projectId, versionNumber).isPresent()) {
 			throw new IllegalStateException("Project version number already exists: " + versionNumber);
@@ -168,7 +159,7 @@ public class ProjectInitializationApplicationService implements ApplicationEvent
 	@Transactional
 	public SemanticGap addGap(Long projectId, Long versionId, String gapType, String question, String recommendation,
 			String evidence, String impactScope, Integer priority, OperatorContext operator) {
-		authorization.requireAtLeast(operator, OperatorRole.EDITOR, "add Semantic Gap");
+		authorization.require(operator, "add Semantic Gap");
 		requireProject(projectId);
 		SemanticProjectVersion version = requireVersion(projectId, versionId);
 		version.assertMutable();
@@ -189,7 +180,7 @@ public class ProjectInitializationApplicationService implements ApplicationEvent
 	@Transactional
 	public ProjectInitializationView initializeVersion(Long projectId, Long versionId, Long initializationModelId,
 			OperatorContext operator) {
-		authorization.requireAtLeast(operator, OperatorRole.EDITOR, "initialize Project Version");
+		authorization.require(operator, "initialize Project Version");
 		SemanticProject project = requireProject(projectId);
 		SemanticProjectVersion version = requireVersion(projectId, versionId);
 		version.configureInitializationModel(initializationModelId);
@@ -201,7 +192,7 @@ public class ProjectInitializationApplicationService implements ApplicationEvent
 
 	@Transactional
 	public ProjectInitializationView startAnalysis(Long projectId, Long versionId, OperatorContext operator) {
-		authorization.requireAtLeast(operator, OperatorRole.EDITOR, "start Project analysis");
+		authorization.require(operator, "start Project analysis");
 		SemanticProject project = requireProject(projectId);
 		SemanticProjectVersion version = requireVersion(projectId, versionId);
 		version.startAnalysis();
@@ -211,7 +202,7 @@ public class ProjectInitializationApplicationService implements ApplicationEvent
 
 	@Transactional
 	public ProjectInitializationView completeAnalysis(Long projectId, Long versionId, OperatorContext operator) {
-		authorization.requireAtLeast(operator, OperatorRole.EDITOR, "complete Project analysis");
+		authorization.require(operator, "complete Project analysis");
 		SemanticProject project = requireProject(projectId);
 		SemanticProjectVersion version = requireVersion(projectId, versionId);
 		assertNoOpenGaps(projectId, versionId);
@@ -228,7 +219,7 @@ public class ProjectInitializationApplicationService implements ApplicationEvent
 	@Transactional
 	public ProjectInitializationView failAnalysis(Long projectId, Long versionId, String error,
 			OperatorContext operator) {
-		authorization.requireAtLeast(operator, OperatorRole.EDITOR, "fail Project analysis");
+		authorization.require(operator, "fail Project analysis");
 		SemanticProject project = requireProject(projectId);
 		SemanticProjectVersion version = requireVersion(projectId, versionId);
 		version.failAnalysis(error);
@@ -240,9 +231,7 @@ public class ProjectInitializationApplicationService implements ApplicationEvent
 	public SemanticGap resolveGap(Long gapId, String answer, OperatorContext operator) {
 		SemanticGap gap = repository.findGap(gapId)
 			.orElseThrow(() -> new IllegalArgumentException("Semantic gap not found: " + gapId));
-		OperatorRole requiredRole = MULTI_SOURCE_POLICY_GAP_TYPES.contains(gap.getGapType()) ? OperatorRole.PUBLISHER
-				: OperatorRole.EDITOR;
-		authorization.requireAtLeast(operator, requiredRole, "resolve Semantic Gap " + gap.getGapType());
+		authorization.require(operator, "resolve Semantic Gap " + gap.getGapType());
 		if (gap.getStatus() != SemanticGapStatus.OPEN) {
 			return gap;
 		}
@@ -259,7 +248,7 @@ public class ProjectInitializationApplicationService implements ApplicationEvent
 
 	@Transactional(propagation = Propagation.NOT_SUPPORTED)
 	public ProjectInitializationView validateVersion(Long projectId, Long versionId, OperatorContext operator) {
-		authorization.requireAtLeast(operator, OperatorRole.REVIEWER, "validate Project Version");
+		authorization.require(operator, "validate Project Version");
 		SemanticProject project = requireProject(projectId);
 		SemanticProjectVersion version = requireVersion(projectId, versionId);
 		assertNoOpenGaps(projectId, versionId);
@@ -286,7 +275,7 @@ public class ProjectInitializationApplicationService implements ApplicationEvent
 
 	@Transactional
 	public ProjectInitializationView publishVersion(Long projectId, Long versionId, OperatorContext operator) {
-		authorization.requireAtLeast(operator, OperatorRole.PUBLISHER, "publish Project Version");
+		authorization.require(operator, "publish Project Version");
 		SemanticProject project = requireProject(projectId);
 		SemanticProjectVersion version = requireVersion(projectId, versionId);
 		assertNoOpenGaps(projectId, versionId);
@@ -316,7 +305,7 @@ public class ProjectInitializationApplicationService implements ApplicationEvent
 
 	@Transactional
 	public ProjectInitializationView activateVersion(Long projectId, Long versionId, OperatorContext operator) {
-		authorization.requireAtLeast(operator, OperatorRole.PUBLISHER, "activate Project Version");
+		authorization.require(operator, "activate Project Version");
 		SemanticProject project = requireProject(projectId);
 		SemanticProjectVersion version = requireVersion(projectId, versionId);
 		if (version.getStatus() != ProjectVersionStatus.PUBLISHED) {

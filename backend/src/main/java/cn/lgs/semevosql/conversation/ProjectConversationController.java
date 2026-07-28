@@ -23,7 +23,7 @@ import cn.lgs.semevosql.conversation.ProjectConversationService.ProjectMessage;
 import cn.lgs.semevosql.conversation.ProjectConversationService.SendMessageCommand;
 import cn.lgs.semevosql.run.QueryRunPublicPresenter;
 import cn.lgs.semevosql.run.QueryRunPublicView;
-import cn.lgs.semevosql.run.RuntimeMutationAuthorizationService;
+import cn.lgs.semevosql.run.RuntimeMutationScopeService;
 import java.security.Principal;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -50,7 +50,7 @@ public class ProjectConversationController {
 
 	private final OperatorContext.Resolver operatorResolver;
 
-	private final RuntimeMutationAuthorizationService runtimeMutationAuthorizationService;
+	private final RuntimeMutationScopeService runtimeMutationScope;
 
 	@GetMapping
 	public List<ProjectConversation> list(@PathVariable Long projectId) {
@@ -96,7 +96,7 @@ public class ProjectConversationController {
 			@PathVariable String runId, @RequestBody HumanReviewCommand command, @RequestHeader HttpHeaders headers,
 			Principal principal) {
 		OperatorContext operator = operatorResolver.resolve(headers, principal, "project-conversation-review:" + runId);
-		runtimeMutationAuthorizationService.requireRunOwnerOrAdmin(runId, operator);
+		runtimeMutationScope.requireRun(runId, operator);
 		return publicPresenter.present(service.submitHumanReview(projectId, conversationId, runId, command));
 	}
 
@@ -104,7 +104,7 @@ public class ProjectConversationController {
 	public ProjectMessage synchronize(@PathVariable Long projectId, @PathVariable String conversationId,
 			@PathVariable String runId, @RequestHeader HttpHeaders headers, Principal principal) {
 		OperatorContext operator = operatorResolver.resolve(headers, principal, "project-conversation-sync:" + runId);
-		runtimeMutationAuthorizationService.requireRunOwnerOrAdmin(runId, operator);
+		runtimeMutationScope.requireRun(runId, operator);
 		return service.synchronizeAssistantMessage(projectId, conversationId, runId);
 	}
 

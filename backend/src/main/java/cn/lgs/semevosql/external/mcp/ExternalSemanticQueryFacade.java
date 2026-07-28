@@ -17,16 +17,14 @@ package cn.lgs.semevosql.external.mcp;
 
 import cn.lgs.semevosql.bo.schema.ResultSetBO;
 import cn.lgs.semevosql.common.OperatorContext;
-import cn.lgs.semevosql.common.OperatorRole;
 import cn.lgs.semevosql.learning.QueryCaseHints;
 import cn.lgs.semevosql.learning.QueryCaseHints.FilterBindingHint;
 import cn.lgs.semevosql.learning.QueryCaseHints.TimeBindingHint;
 import cn.lgs.semevosql.multisource.MultiSourceRunService;
 import cn.lgs.semevosql.multisource.MultiSourceRunService.ResultArtifact;
 import cn.lgs.semevosql.project.application.ProjectRuntimeGate;
+import cn.lgs.semevosql.project.application.ProjectScopeService;
 import cn.lgs.semevosql.project.domain.ProjectRuntimeContext;
-import cn.lgs.semevosql.project.security.ProjectAccessRole;
-import cn.lgs.semevosql.project.security.ProjectAccessService;
 import cn.lgs.semevosql.run.QueryRun;
 import cn.lgs.semevosql.run.QueryRunErrorPresenter;
 import cn.lgs.semevosql.run.QueryRun.RunStatus;
@@ -63,7 +61,7 @@ import org.springframework.util.StringUtils;
 @RequiredArgsConstructor
 public class ExternalSemanticQueryFacade {
 
-    private final ProjectAccessService accessService;
+    private final ProjectScopeService projectScope;
     private final ProjectRuntimeGate runtimeGate;
     private final SemanticCatalogApplicationService catalogService;
     private final VerifiedQueryExecutionService executionService;
@@ -141,12 +139,12 @@ public class ExternalSemanticQueryFacade {
                 fingerprint, request.question()) == 0) {
             return getResult(deployment, queryId);
         }
-        runService.bindExecution(run.runId(), queryId, queryId + ":attempt", threadId);
+		run = runService.bindExecution(run.runId(), queryId, queryId + ":attempt", threadId);
         repository.audit(deployment.deploymentId(), deployment.projectId(), deployment.principalId(),
                 "EXECUTE_QUERY_PLAN", "STARTED", queryId);
         try {
-            VerifiedQueryExecutionService.ExecutionResult executed = executionService.execute(run.runId(), "mcp",
-                    deployment.projectId(), runtime.projectVersionId(), deployment.principalId(), plan);
+			VerifiedQueryExecutionService.ExecutionResult executed = executionService.execute(run.runId(), run.attemptId(),
+					"mcp", deployment.projectId(), runtime.projectVersionId(), deployment.principalId(), plan);
             runService.transition(run.runId(), RunStatus.SUCCEEDED, "mcp-data-plane", null, null);
             runService.appendEvent(run.runId(), "RUN_SUCCEEDED", "mcp-data-plane", null,
                     "External MCP governed query completed", "run-succeeded:" + run.runId());
@@ -362,9 +360,9 @@ public class ExternalSemanticQueryFacade {
         if (deployment == null || deployment.status() != ProjectMcpDeployment.Status.RUNNING) {
             throw new IllegalStateException("MCP deployment is not running");
         }
-        OperatorContext operator = new OperatorContext(deployment.principalId(), OperatorRole.VIEWER, "MCP_EXTERNAL",
+        OperatorContext operator = new OperatorContext(deployment.principalId(), "MCP_EXTERNAL",
                 UUID.randomUUID().toString(), operation);
-        accessService.requireAccess(deployment.projectId(), operator, ProjectAccessRole.VIEWER);
+        projectScope.requireProject(deployment.projectId(), operator);
     }
 
     private String json(Object value) {

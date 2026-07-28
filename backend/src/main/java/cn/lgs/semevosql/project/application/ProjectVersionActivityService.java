@@ -39,7 +39,7 @@ public class ProjectVersionActivityService {
 							(project_id, project_version_id, activity_type, operator_name, operator_role, request_id, idempotency_key)
 							VALUES (?, ?, ?, ?, ?, ?, ?)
 							""",
-					projectId, projectVersionId, activityType.name(), operator.operator(), operator.role().name(),
+					projectId, projectVersionId, activityType.name(), operator.operator(), "LOCAL_OPERATOR",
 					operator.requestId(), operator.idempotencyKey());
 		}
 		catch (DuplicateKeyException ignored) {

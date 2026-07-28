@@ -20,6 +20,7 @@ import cn.lgs.semevosql.model.SemEvoSQLModelGateway;
 import cn.lgs.semevosql.model.SemEvoSQLModelGateway.ModelCallResult;
 import cn.lgs.semevosql.service.llm.LlmInvocationOptions;
 import cn.lgs.semevosql.service.llm.LlmService;
+import java.time.Duration;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -53,5 +54,16 @@ public class SemanticDocumentExtractionClient {
 	public ModelCallResult complete(ModelCallPurpose purpose, String systemPrompt, String userPrompt,
 			LlmInvocationOptions invocationOptions) {
 		return modelGateway.complete(purpose, systemPrompt, userPrompt, invocationOptions);
+	}
+
+	public ModelCallResult complete(ModelCallPurpose purpose, String systemPrompt, String userPrompt,
+			Duration callBudget) {
+		return modelGateway.complete(purpose, systemPrompt, userPrompt,
+				modelGateway.defaultOptionsFor(purpose), callBudget);
+	}
+
+	public ModelCallResult complete(ModelCallPurpose purpose, String systemPrompt, String userPrompt,
+			LlmInvocationOptions invocationOptions, Duration callBudget) {
+		return modelGateway.complete(purpose, systemPrompt, userPrompt, invocationOptions, callBudget);
 	}
 }

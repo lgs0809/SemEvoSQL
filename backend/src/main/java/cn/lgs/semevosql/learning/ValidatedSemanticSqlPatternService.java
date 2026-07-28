@@ -16,6 +16,7 @@
 package cn.lgs.semevosql.learning;
 
 import cn.lgs.semevosql.common.json.CanonicalJson;
+import cn.lgs.semevosql.run.RunExecutionFenceService;
 import cn.lgs.semevosql.semantic.compiler.LoweringCapabilityProbe;
 import cn.lgs.semevosql.semantic.domain.SemanticBlueprint;
 import cn.lgs.semevosql.util.JsonUtil;
@@ -28,6 +29,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -54,8 +56,17 @@ public class ValidatedSemanticSqlPatternService {
 
 	private final CanonicalJson canonicalJson = new CanonicalJson();
 
-	public ValidatedSemanticSqlPatternService(JdbcTemplate jdbc) {
+	private final RunExecutionFenceService executionFence;
+
+	@Autowired
+	public ValidatedSemanticSqlPatternService(JdbcTemplate jdbc, RunExecutionFenceService executionFence) {
 		this.jdbc = jdbc;
+		this.executionFence = executionFence;
+	}
+
+	/** Lightweight constructor retained for pure shape-validation tests. */
+	public ValidatedSemanticSqlPatternService(JdbcTemplate jdbc) {
+		this(jdbc, null);
 	}
 
 	@Transactional
@@ -113,6 +124,13 @@ public class ValidatedSemanticSqlPatternService {
 	@Transactional
 	public String renderReusablePatternHints(Long projectId, Long projectVersionId, String catalogHash,
 			Integer datasourceId, String principalId, String runId, SemanticBlueprint plan, int limit) {
+		return renderReusablePatternHints(projectId, projectVersionId, catalogHash, datasourceId, principalId, runId,
+				null, plan, limit);
+	}
+
+	@Transactional
+	public String renderReusablePatternHints(Long projectId, Long projectVersionId, String catalogHash,
+			Integer datasourceId, String principalId, String runId, String attemptId, SemanticBlueprint plan, int limit) {
 		if (projectId == null || projectVersionId == null || plan == null || !StringUtils.hasText(catalogHash)) {
 			return "";
 		}
@@ -133,6 +151,9 @@ public class ValidatedSemanticSqlPatternService {
 				"\n[已验证复杂 Semantic SQL Pattern，仅作为当前 Catalog 下的结构参考]\n");
 		int index = 0;
 		for (Map<String, Object> row : compatible) {
+			if (executionFence != null && StringUtils.hasText(runId) && StringUtils.hasText(attemptId)) {
+				executionFence.assertActive(runId, attemptId);
+			}
 			index++;
 			String patternId = text(row.get("id"));
 			result.append(index).append(". Computation shape: ").append(computationShapeHash(plan))
@@ -257,9 +278,11 @@ public class ValidatedSemanticSqlPatternService {
 		return canonicalJson.hash(shape);
 	}
 
-	private String computationShapeHash(SemanticBlueprint plan) {
+	String computationShapeHash(SemanticBlueprint plan) {
 		Map<String, Object> shape = new LinkedHashMap<>();
 		shape.put("capabilities", LoweringCapabilityProbe.effectiveCapabilities(plan).stream().map(Enum::name).sorted().toList());
+		shape.put("requirements", plan.getComputationIntent() == null ? List.of()
+				: plan.getComputationIntent().canonicalRequirements());
 		shape.put("groups", plan.getGroupBy().stream().map(group -> Map.of("model",
 				Objects.toString(group.getModelCode(), ""), "column", Objects.toString(group.getColumnName(), ""), "bucket",
 				Objects.toString(group.getTimeBucketGranularity(), ""))).toList());

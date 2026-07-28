@@ -17,6 +17,7 @@ package cn.lgs.semevosql.workflow.node;
 
 import static cn.lgs.semevosql.constant.Constant.ACTIVE_TODO_ID;
 import static cn.lgs.semevosql.constant.Constant.ADVANCED_EXECUTION_FALLBACK;
+import static cn.lgs.semevosql.constant.Constant.ATTEMPT_ID;
 import static cn.lgs.semevosql.constant.Constant.FORCED_DATASOURCE_ID;
 import static cn.lgs.semevosql.constant.Constant.FORCED_PHYSICAL_TABLES;
 import static cn.lgs.semevosql.constant.Constant.LAST_SQL_EXECUTED_STEP;
@@ -89,12 +90,14 @@ public class SemanticExecutionNode implements NodeAction {
 		Long projectId = StateUtil.getObjectValue(state, PROJECT_ID, Long.class);
 		Long versionId = StateUtil.getObjectValue(state, PROJECT_VERSION_ID, Long.class);
 		String runId = StateUtil.getStringValue(state, RUN_ID, "");
+		String attemptId = StateUtil.getStringValue(state, ATTEMPT_ID, "");
 		String principalId = StateUtil.getStringValue(state, PRINCIPAL_ID, "anonymous");
 
 		String executionKey = executionKey(state, plan);
 		VerifiedQueryExecutionService.ExecutionResult executed;
 		try {
-			executed = verifiedQueryExecutionService.execute(runId, executionKey, projectId, versionId, principalId, plan);
+			executed = verifiedQueryExecutionService.execute(runId, attemptId, executionKey, projectId, versionId,
+					principalId, plan);
 		}
 		catch (ConstrainedGenerationRequiredException unsupported) {
 			log.info("Semantic Blueprint requires advanced/constrained execution fallback: {}", unsupported.getMessage());
