@@ -1,0 +1,22 @@
+services:
+  metadata-db:
+    ports:
+      - "127.0.0.1:15463:5432"
+  backend:
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xms64m -Xmx512m"
+      SEMEVOSQL_OPERATOR_DEFAULT_OPERATOR: semevosql-acceptance-owner
+      SPRING_APPLICATION_JSON: ${SEMEVOSQL_LOCAL_SECURITY_JSON:-}
+      SEMEVOSQL_RETENTION_ENABLED: "false"
+      # Administrator-only deployment control for isolated frozen evaluation projects.
+      SEMEVOSQL_EVALUATION_FROZEN_PROJECT_IDS: ${SEMEVOSQL_EVALUATION_FROZEN_PROJECT_IDS:-}
+      # Keep the ordinary Luna model active; explicitly bind governed semantic planning to Terra.
+      SEMEVOSQL_PLANNER_REASONING_MODEL_OVERRIDE: "gpt-5.6-terra"
+      # Named synthetic fixtures contain up to 4000 rows per business table.
+      # Permit their bounded whole-period aggregates; EXPLAIN and join/output/time limits still apply.
+      SEMEVOSQL_SQL_EXECUTION_REJECT_FULL_TABLE_SCAN: "false"
+      SEMEVOSQL_SQL_EXECUTION_MAX_FULL_SCAN_ROWS: "5000"
+      SEMEVOSQL_SQL_EXECUTION_MAX_ESTIMATED_ROWS: "10000"
+  execution-worker:
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xms32m -Xmx256m"

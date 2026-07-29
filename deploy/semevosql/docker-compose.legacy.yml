@@ -1,0 +1,16 @@
+# One-cycle local upgrade compatibility for existing QueryWeaver Docker resources.
+# New SemEvoSQL deployments do not use this file; start-semevosql.sh enables it only when a
+# legacy deployment env is detected.
+
+volumes:
+  semevosql-metadata:
+    external: true
+    name: ${SEMEVOSQL_METADATA_VOLUME:-queryweaver-metadata-pg16}
+  semevosql-uploads:
+    external: true
+    name: ${SEMEVOSQL_UPLOADS_VOLUME:-queryweaver-uploads}
+
+networks:
+  semevosql-net:
+    external: true
+    name: ${SEMEVOSQL_NETWORK_NAME:-queryweaver-net}

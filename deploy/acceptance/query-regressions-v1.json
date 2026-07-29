@@ -1,0 +1,77 @@
+{
+  "formatVersion": 1,
+  "scope": "DEVELOPMENT_SMOKE_NOT_HELD_OUT_BENCHMARK",
+  "source": "Named synthetic quality commerce fixture; manually specified business questions and independent physical SQL.",
+  "projectId": 3,
+  "projectVersionId": 11,
+  "datasourceId": 2,
+  "account": "sem_member_b",
+  "database": "semevosql_quality_business_v1",
+  "cases": [
+    {
+      "id": "q1-order-count",
+      "family": "all-state-order-identity-count",
+      "question": "按下单时间统计2026年第一季度的订单数量，所有订单状态都包括，只返回合计订单数。",
+      "metrics": ["order_count"],
+      "columns": {"order_count": "order_count"},
+      "oracleSql": "SELECT COUNT(*) AS order_count FROM public.orders WHERE ordered_at >= TIMESTAMP '2026-01-01' AND ordered_at < TIMESTAMP '2026-04-01'"
+    },
+    {
+      "id": "q1-order-amount",
+      "family": "order-record-amount-not-items-or-refunds",
+      "question": "统计2026年第一季度按下单时间归属的下单金额合计，单位元，包含全部订单状态；使用订单记录金额，不扣退款，不从订单明细重建。",
+      "metrics": ["ordered_amount"],
+      "columns": {"ordered_amount": "ordered_amount"},
+      "oracleSql": "SELECT SUM(amount) AS ordered_amount FROM public.orders WHERE ordered_at >= TIMESTAMP '2026-01-01' AND ordered_at < TIMESTAMP '2026-04-01'"
+    },
+    {
+      "id": "january-average-null",
+      "family": "nullable-record-average",
+      "question": "2026年1月全部状态订单的平均订单金额是多少？按下单时间统计，单位元，金额为空的订单不填零，不扣退款。只返回平均值。",
+      "metrics": ["average_order_amount"],
+      "columns": {"average_order_amount": "average_order_amount"},
+      "oracleSql": "SELECT AVG(amount) AS average_order_amount FROM public.orders WHERE ordered_at >= TIMESTAMP '2026-01-01' AND ordered_at < TIMESTAMP '2026-02-01'"
+    },
+    {
+      "id": "q1-monthly-count",
+      "family": "monthly-order-time-bucket",
+      "question": "按下单月份列出2026年第一季度每个月的订单数量，不筛选订单状态，按月份从早到晚排列。",
+      "metrics": ["order_count"],
+      "columns": {"ordered_at_month": "ordered_at_month", "order_count": "order_count"},
+      "dateColumns": ["ordered_at_month"],
+      "oracleSql": "SELECT DATE_TRUNC('month',ordered_at) AS ordered_at_month,COUNT(*) AS order_count FROM public.orders WHERE ordered_at >= TIMESTAMP '2026-01-01' AND ordered_at < TIMESTAMP '2026-04-01' GROUP BY DATE_TRUNC('month',ordered_at)"
+    },
+    {
+      "id": "february-cancelled",
+      "family": "published-fixed-status-filter",
+      "question": "2026年2月的取消订单数量是多少？按下单时间统计，仅包含状态为已取消的订单，只返回合计数量。",
+      "metrics": ["cancelled_order_count"],
+      "columns": {"cancelled_order_count": "cancelled_order_count"},
+      "oracleSql": "SELECT COUNT(*) AS cancelled_order_count FROM public.orders WHERE status='CANCELLED' AND ordered_at >= TIMESTAMP '2026-02-01' AND ordered_at < TIMESTAMP '2026-03-01'"
+    },
+    {
+      "id": "q1-paid-time-count",
+      "family": "payment-time-cross-month-and-refunded-status",
+      "question": "按支付记录时间统计2026年第一季度的已支付订单数量，已退款但曾支付的订单也算，不改为按下单时间统计，只返回合计数量。",
+      "metrics": ["paid_order_count"],
+      "columns": {"paid_order_count": "paid_order_count"},
+      "oracleSql": "SELECT COUNT(*) AS paid_order_count FROM public.orders WHERE status IN ('PAID','REFUNDED') AND paid_at >= TIMESTAMP '2026-01-01' AND paid_at < TIMESTAMP '2026-04-01'"
+    },
+    {
+      "id": "q1-successful-refund-rows",
+      "family": "refund-row-count-not-distinct-orders",
+      "question": "按成功退款时间统计2026年第一季度的成功退款次数，只算SUCCESS的退款记录；同一订单多次成功退款分别计数，不按订单去重。返回合计次数。",
+      "metrics": ["successful_refund_count"],
+      "columns": {"successful_refund_count": "successful_refund_count"},
+      "oracleSql": "SELECT COUNT(*) AS successful_refund_count FROM public.refunds WHERE status='SUCCESS' AND refunded_at >= TIMESTAMP '2026-01-01' AND refunded_at < TIMESTAMP '2026-04-01'"
+    },
+    {
+      "id": "q1-successful-refund-orders",
+      "family": "refund-distinct-order-count",
+      "question": "按成功退款时间统计2026年第一季度的成功退款订单数，只算SUCCESS；同一订单在所选期内有多笔成功退款也只计一单。返回合计订单数，不使用订单下单时间筛选。",
+      "metrics": ["successful_refund_order_count"],
+      "columns": {"successful_refund_order_count": "successful_refund_order_count"},
+      "oracleSql": "SELECT COUNT(DISTINCT order_id) AS successful_refund_order_count FROM public.refunds WHERE status='SUCCESS' AND refunded_at >= TIMESTAMP '2026-01-01' AND refunded_at < TIMESTAMP '2026-04-01'"
+    }
+  ]
+}

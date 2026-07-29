@@ -1,0 +1,27 @@
+{
+  "projectId": 2,
+  "cases": [
+    {
+      "caseCode": "acceptance-ux-20261001-january-ordered-amount",
+      "question": "查询2026年1月的下单金额，按订单创建时间统计，单位为元。",
+      "replayMode": "LIVE",
+      "enabled": true,
+      "expected": {
+        "expectedOutcome": "SUCCEED",
+        "modelCodes": ["orders"],
+        "metricCodes": ["ordered_amount"],
+        "timeColumn": "ordered_at",
+        "timeStartInclusive": "2026-01-01T00:00:00",
+        "timeEndExclusive": "2026-02-01T00:00:00",
+        "expectedColumns": ["ordered_amount"],
+        "expectedTypes": {"ordered_amount": "NUMBER"},
+        "requireNonEmpty": true,
+        "notNullColumns": ["ordered_amount"],
+        "rowCountMin": 1,
+        "rowCountMax": 1,
+        "rangeAssertions": {"ordered_amount": {"min": 0}},
+        "maxLatencyMs": 10000
+      }
+    }
+  ]
+}

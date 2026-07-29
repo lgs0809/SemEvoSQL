@@ -1,0 +1,31 @@
+# Copyright 2024-2026 the original author or authors.
+# Licensed under the Apache License, Version 2.0.
+
+FROM eclipse-temurin:17-jdk-jammy AS build
+WORKDIR /workspace
+
+COPY .mvn .mvn
+COPY mvnw pom.xml ./
+COPY .github/maven-settings.xml .github/maven-settings.xml
+COPY config config
+COPY skills/semantic-catalog-init/schemas skills/semantic-catalog-init/schemas
+COPY backend/pom.xml backend/pom.xml
+COPY backend/src backend/src
+RUN --mount=type=cache,target=/root/.m2 \
+    chmod +x mvnw && ./mvnw -q -s .github/maven-settings.xml -pl backend -am -DskipTests package
+
+FROM eclipse-temurin:17-jre-jammy AS runtime
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --uid 10001 --gid root --home-dir /app semevosql \
+    && mkdir -p /app/uploads /app/config \
+    && chown -R 10001:0 /app
+
+WORKDIR /app
+COPY --from=build --chown=10001:0 /workspace/backend/target/semevosql-backend.jar /app/semevosql-backend.jar
+
+USER 10001
+EXPOSE 8065
+ENTRYPOINT ["java", "-jar", "/app/semevosql-backend.jar", "--spring.config.location=classpath:application.yml,optional:file:/app/config/application.yml"]
