@@ -189,7 +189,6 @@
   import { ElMessage } from 'element-plus';
   import { Plus, Refresh, Search } from '@element-plus/icons-vue';
   import BaseLayout from '@/layouts/BaseLayout.vue';
-  import { platformContext } from '@/services/platformContext';
   import { projectListAction } from '@/services/projectCapabilities.mjs';
   import {
     semEvoSQLService,
@@ -204,7 +203,6 @@
 
   const healthByProject = ref<Record<number, ProjectHealthSummary>>({});
   const healthFailureIds = ref<Set<number>>(new Set());
-  const operatorRole = ref<'VIEWER' | 'EDITOR' | 'REVIEWER' | 'PUBLISHER' | 'ADMIN'>('VIEWER');
   const listError = ref('');
   const keyword = ref('');
   const statusFilter = ref<StatusFilter>('ALL');
@@ -216,7 +214,7 @@
   ];
   const loading = ref(false);
 
-  const canCreateProject = computed(() => operatorRole.value !== 'VIEWER');
+  const canCreateProject = computed(() => true);
   const readyCount = computed(
     () => projects.value.filter(item => healthByProject.value[item.id]?.queryReady).length,
   );
@@ -267,13 +265,11 @@
     loading.value = true;
     listError.value = '';
     try {
-      const [nextProjects, summaries, operator] = await Promise.all([
+      const [nextProjects, summaries] = await Promise.all([
         semEvoSQLService.listProjects(),
         semEvoSQLService.projectHealthSummaries(),
-        platformContext.operator(),
       ]);
       projects.value = nextProjects;
-      operatorRole.value = operator.role;
       healthByProject.value = Object.fromEntries(summaries.map(item => [item.projectId, item]));
       healthFailureIds.value = new Set(
         summaries.filter(item => !item.available).map(item => item.projectId),
@@ -285,10 +281,7 @@
     }
   };
 
-  const summaryFromHealth = (
-    value: ProjectHealth,
-    previous?: ProjectHealthSummary,
-  ): ProjectHealthSummary => ({
+  const summaryFromHealth = (value: ProjectHealth): ProjectHealthSummary => ({
     projectId: value.projectId,
     available: true,
     queryReady: value.queryReady,
@@ -297,8 +290,6 @@
     totalQueries: value.quality.totalQueries,
     querySuccessRate: value.quality.querySuccessRate,
     correctionCount: value.quality.correctionCount,
-    accessRole: previous?.accessRole || 'VIEWER',
-    globalAdmin: previous?.globalAdmin || false,
   });
   const health = (projectId: number) => {
     const value = healthByProject.value[projectId];
@@ -312,7 +303,7 @@
       const nextHealth = await semEvoSQLService.projectHealth(projectId);
       healthByProject.value = {
         ...healthByProject.value,
-        [projectId]: summaryFromHealth(nextHealth, healthByProject.value[projectId]),
+        [projectId]: summaryFromHealth(nextHealth),
       };
       const nextFailures = new Set(healthFailureIds.value);
       nextFailures.delete(projectId);
@@ -322,14 +313,14 @@
     }
   };
   const projectActionLabel = (projectId: number) => {
-    const action = projectListAction(healthByProject.value[projectId], operatorRole.value);
+    const action = projectListAction(healthByProject.value[projectId]);
     if (action === 'CHAT') return '开始问数';
     if (action === 'PREPARE') return '继续准备';
     return health(projectId) ? '查看状态' : '查看项目';
   };
   const handleProjectAction = (projectId: number) => {
     const projectHealth = healthByProject.value[projectId];
-    const action = projectListAction(projectHealth, operatorRole.value);
+    const action = projectListAction(projectHealth);
     if (action === 'CHAT') {
       void startChat(projectId);
       return;

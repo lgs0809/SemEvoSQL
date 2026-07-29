@@ -9,18 +9,12 @@
 <script setup lang="ts">
   import { onMounted } from 'vue';
   import { useRouter } from 'vue-router';
-  import { platformContext } from '@/services/platformContext';
   import { defaultHomeForRole } from '@/services/projectCapabilities.mjs';
 
   const router = useRouter();
 
   onMounted(async () => {
-    try {
-      const operator = await platformContext.operator();
-      await router.replace(defaultHomeForRole(operator.role));
-    } catch {
-      await router.replace('/projects');
-    }
+    await router.replace(defaultHomeForRole());
   });
 </script>
 

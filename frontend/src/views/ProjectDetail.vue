@@ -226,13 +226,7 @@
   import { ArrowLeft } from '@element-plus/icons-vue';
   import BaseLayout from '@/layouts/BaseLayout.vue';
   import ProjectLifecycle from '@/components/project/ProjectLifecycle.vue';
-  import { platformContext } from '@/services/platformContext';
-  import {
-    canEditProject as canEditProjectCapability,
-    canManageProject as canManageProjectCapability,
-    canReviewProject as canReviewProjectCapability,
-    projectSectionVisible,
-  } from '@/services/projectCapabilities.mjs';
+  import { projectSectionVisible } from '@/services/projectCapabilities.mjs';
   import ProjectOverview from '@/components/project/ProjectOverview.vue';
   import {
     projectDetailSectionForTarget,
@@ -242,8 +236,6 @@
   } from '@/services/projectExperience';
   import {
     semEvoSQLService,
-    type OperatorView,
-    type ProjectAccessView,
     type ProjectHealth,
     type ProjectInitializationView,
     type SemanticProjectVersion,
@@ -296,8 +288,6 @@
     return value || undefined;
   });
   const projectView = ref<ProjectInitializationView>();
-  const projectAccess = ref<ProjectAccessView>();
-  const operator = ref<OperatorView>();
   const health = ref<ProjectHealth>();
   const healthLoading = ref(false);
   const healthError = ref('');
@@ -347,42 +337,12 @@
   const governanceTab = ref(
     ['release', 'versions', 'releases'].includes(requestedSection) ? 'release' : 'test',
   );
-  const canEditProject = computed(() =>
-    canEditProjectCapability(
-      projectAccess.value?.accessRole,
-      operator.value?.role,
-      projectAccess.value?.globalAdmin,
-    ),
-  );
-  const canReviewProject = computed(() =>
-    canReviewProjectCapability(
-      projectAccess.value?.accessRole,
-      operator.value?.role,
-      projectAccess.value?.globalAdmin,
-    ),
-  );
-  const canPublishProject = computed(
-    () =>
-      Boolean(projectAccess.value?.globalAdmin) ||
-      (['EDITOR', 'OWNER'].includes(projectAccess.value?.accessRole || '') &&
-        ['PUBLISHER', 'ADMIN'].includes(operator.value?.role || '')),
-  );
-  const canAdminOperations = computed(
-    () => Boolean(projectAccess.value?.globalAdmin) || operator.value?.role === 'ADMIN',
-  );
-  const canManageProject = computed(() =>
-    canManageProjectCapability(
-      projectAccess.value?.accessRole,
-      operator.value?.role,
-      projectAccess.value?.globalAdmin,
-    ),
-  );
-  const sectionVisible = (section: ProjectSection) =>
-    projectSectionVisible(section, {
-      edit: canEditProject.value,
-      review: canReviewProject.value,
-      manage: canManageProject.value,
-    });
+  const canEditProject = computed(() => true);
+  const canReviewProject = computed(() => true);
+  const canPublishProject = computed(() => true);
+  const canAdminOperations = computed(() => true);
+  const canManageProject = computed(() => true);
+  const sectionVisible = (section: ProjectSection) => projectSectionVisible(section);
   const primaryAction = computed(() => projectPrimaryAction(health.value));
   const primaryActionLabel = computed(() => {
     if (
@@ -436,19 +396,9 @@
     }
     return canEditProject.value;
   });
-  const firstRunActionHint = computed(() => {
-    if (!firstRunActionAllowed.value) {
-      if (health.value?.workingVersion?.status === 'DRAFT')
-        return '需要项目编辑权限和 Reviewer 以上全局角色才能验证业务模型。';
-      if (
-        ['VALIDATED', 'READY', 'PUBLISHED'].includes(health.value?.workingVersion?.status || '')
-      ) {
-        return '需要项目编辑权限和 Publisher 以上全局角色才能发布或激活业务模型。';
-      }
-      return '当前运行权限仅允许查看，业务规则确认需要项目编辑权限。';
-    }
-    return health.value?.nextActions[0]?.description || '系统只会执行当前事实允许的下一步。';
-  });
+  const firstRunActionHint = computed(
+    () => health.value?.nextActions[0]?.description || '系统只会执行当前事实允许的下一步。',
+  );
 
   const loadHealth = async () => {
     healthLoading.value = true;
@@ -465,15 +415,11 @@
   const load = async () => {
     loading.value = true;
     try {
-      const [nextProjectView, nextProjectAccess, nextOperator, nextVersions] = await Promise.all([
+      const [nextProjectView, nextVersions] = await Promise.all([
         semEvoSQLService.project(projectId),
-        semEvoSQLService.projectAccess(projectId),
-        platformContext.operator(),
         semEvoSQLService.projectVersions(projectId),
       ]);
       projectView.value = nextProjectView;
-      projectAccess.value = nextProjectAccess;
-      operator.value = nextOperator;
       versions.value = nextVersions;
       if (!sectionVisible(activeSection.value)) {
         activeSection.value = 'overview';

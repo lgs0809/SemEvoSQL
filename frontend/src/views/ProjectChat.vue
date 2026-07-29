@@ -632,7 +632,6 @@
   } from '@/services/runRecoveryState.mjs';
   import {
     semEvoSQLService,
-    type ProjectAccessView,
     type ProjectConversation,
     type ProjectHealth,
     type ProjectInitializationView,
@@ -678,7 +677,6 @@
   const versions = ref<SemanticProjectVersion[]>([]);
   const selectedProject = ref<ProjectInitializationView>();
   const selectedProjectId = ref<number>();
-  const selectedProjectAccess = ref<ProjectAccessView>();
   const selectedProjectHealth = ref<ProjectHealth>();
   const initializationError = ref('');
   const platformReadiness = ref<PlatformReadiness>();
@@ -705,10 +703,7 @@
   const selectedClarificationScope = ref<SemanticBindingScope>('QUERY');
   const clarificationCustomAnswer = ref('');
   const answeringClarification = ref(false);
-  const currentOperatorId = ref('ui-user');
-  const currentOperatorRole = ref<'VIEWER' | 'EDITOR' | 'REVIEWER' | 'PUBLISHER' | 'ADMIN'>(
-    'VIEWER',
-  );
+  const currentOperatorId = ref('local-operator');
   const preferenceActionId = ref<number>();
   const hiddenUpgradePromptIds = ref<Set<number>>(new Set());
   const humanReviewFeedback = ref('');
@@ -818,20 +813,9 @@
   const clarificationAllowsDurableScope = computed(() =>
     ['METRIC', 'DIMENSION', 'ENUM_VALUE'].includes(clarification.value?.assetType || ''),
   );
-  const canSubmitPersonalFeedback = computed(() =>
-    Boolean(selectedProjectAccess.value?.globalAdmin || selectedProjectAccess.value?.accessRole),
-  );
-  const canSubmitProjectRule = computed(
-    () =>
-      ['EDITOR', 'REVIEWER', 'PUBLISHER', 'ADMIN'].includes(currentOperatorRole.value) &&
-      ['EDITOR', 'OWNER'].includes(selectedProjectAccess.value?.accessRole || ''),
-  );
-  const canViewTechnicalDetails = computed(
-    () =>
-      Boolean(selectedProjectAccess.value?.globalAdmin) ||
-      (['EDITOR', 'REVIEWER', 'PUBLISHER', 'ADMIN'].includes(currentOperatorRole.value) &&
-        ['EDITOR', 'OWNER'].includes(selectedProjectAccess.value?.accessRole || '')),
-  );
+  const canSubmitPersonalFeedback = computed(() => true);
+  const canSubmitProjectRule = computed(() => true);
+  const canViewTechnicalDetails = computed(() => true);
   const humanReviewRequired = computed(() => {
     if (
       activeRun.value?.status !== 'WAITING_HUMAN' ||
@@ -1053,13 +1037,11 @@
     conversationLoading.value = true;
     try {
       const healthPromise = reloadSelectedProjectHealth();
-      [selectedProject.value, selectedProjectAccess.value, versions.value, conversations.value] =
-        await Promise.all([
-          semEvoSQLService.project(selectedProjectId.value),
-          semEvoSQLService.projectAccess(selectedProjectId.value),
-          semEvoSQLService.projectVersions(selectedProjectId.value),
-          semEvoSQLService.projectConversations(selectedProjectId.value),
-        ]);
+      [selectedProject.value, versions.value, conversations.value] = await Promise.all([
+        semEvoSQLService.project(selectedProjectId.value),
+        semEvoSQLService.projectVersions(selectedProjectId.value),
+        semEvoSQLService.projectConversations(selectedProjectId.value),
+      ]);
       await healthPromise;
       await loadWelcomeExamples();
       const restoredConversation = canRestoreCursor(
@@ -1646,13 +1628,7 @@
           error instanceof Error ? error.message : '平台模型能力状态读取失败';
       });
     try {
-      const [operator, projectList] = await Promise.all([
-        platformContext.operator(),
-        semEvoSQLService.listProjects(),
-      ]);
-      currentOperatorId.value = operator.operator;
-      currentOperatorRole.value = operator.role;
-      projects.value = projectList;
+      projects.value = await semEvoSQLService.listProjects();
       const persisted = readPersistedRunCursor();
       const queryProjectId = Number(route.query.projectId);
       selectedProjectId.value =

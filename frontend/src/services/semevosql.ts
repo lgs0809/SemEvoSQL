@@ -12,11 +12,8 @@ const apiBase = '/api/semevosql';
 axios.interceptors.response.use(
   response => response,
   error => {
-    const status = error?.response?.status;
     const serverMessage = error?.response?.data?.message;
-    if (serverMessage) {
-      error.message = status === 403 ? `权限不足：${serverMessage}` : serverMessage;
-    }
+    if (serverMessage) error.message = serverMessage;
     return Promise.reject(error);
   },
 );
@@ -31,7 +28,6 @@ const governedMutationHeaders = (operation: string) => {
 
 export interface OperatorView {
   operator: string;
-  role: 'VIEWER' | 'EDITOR' | 'REVIEWER' | 'PUBLISHER' | 'ADMIN';
   source: string;
 }
 
@@ -172,14 +168,6 @@ export interface ProjectInitializationView {
   nextGap?: { id: number; question: string; gapType: string; status: string };
 }
 
-type ProjectAccessRole = 'VIEWER' | 'EDITOR' | 'OWNER';
-
-export interface ProjectAccessView {
-  projectId: number;
-  accessRole: ProjectAccessRole;
-  globalAdmin: boolean;
-}
-
 export interface ProjectHealthSummary {
   projectId: number;
   available: boolean;
@@ -201,8 +189,6 @@ export interface ProjectHealthSummary {
   totalQueries: number;
   querySuccessRate: number;
   correctionCount: number;
-  accessRole: 'VIEWER' | 'EDITOR' | 'OWNER';
-  globalAdmin: boolean;
 }
 
 export interface ProjectHealth {
@@ -675,7 +661,6 @@ interface QueryDiagnosisRepairAction {
   code: string;
   label: string;
   description: string;
-  requiredRole: string;
   enabled: boolean;
   kind: 'CORRECTION' | 'EVOLUTION' | 'REPLAY' | 'RELEASE' | string;
 }
@@ -1190,9 +1175,6 @@ export const semEvoSQLService = {
   },
   async projectHealthSummaries(): Promise<ProjectHealthSummary[]> {
     return (await axios.get(`${apiBase}/projects/health-summary`)).data;
-  },
-  async projectAccess(projectId: number): Promise<ProjectAccessView> {
-    return (await axios.get(`${apiBase}/projects/${projectId}/access`)).data;
   },
   async projectReleaseCenter(projectId: number): Promise<ProjectReleaseCenter> {
     return (await axios.get(`${apiBase}/projects/${projectId}/release-center`)).data;

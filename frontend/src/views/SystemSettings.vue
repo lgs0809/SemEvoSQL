@@ -29,8 +29,8 @@
               <h2>业务理解与问数模型</h2>
               <p>用于项目初始化、业务理解和查询执行。</p>
             </div>
-            <el-tag :type="statusType(readiness.chatModelReady)" effect="plain">
-              {{ readiness.chatModelReady ? '已验证可用' : '尚未就绪' }}
+            <el-tag :type="statusType(readiness.chatModelStatus)" effect="plain">
+              {{ statusLabel(readiness.chatModelStatus) }}
             </el-tag>
           </div>
           <div class="fact-row">
@@ -39,7 +39,7 @@
           </div>
           <div class="fact-row">
             <span>真实可用性验证</span>
-            <strong>{{ readiness.chatModelReady ? '最近测试通过' : '尚未通过' }}</strong>
+            <strong>{{ verificationLabel(readiness.chatModelStatus) }}</strong>
           </div>
           <div class="fact-row">
             <span>最近验证</span>
@@ -53,8 +53,8 @@
               <h2>语义检索模型</h2>
               <p>用于 Semantic Retrieval 与历史案例的向量召回。</p>
             </div>
-            <el-tag :type="statusType(readiness.embeddingModelReady)" effect="plain">
-              {{ readiness.embeddingModelReady ? '已验证可用' : '尚未就绪' }}
+            <el-tag :type="statusType(readiness.embeddingModelStatus)" effect="plain">
+              {{ statusLabel(readiness.embeddingModelStatus) }}
             </el-tag>
           </div>
           <div class="fact-row">
@@ -63,7 +63,7 @@
           </div>
           <div class="fact-row">
             <span>真实可用性验证</span>
-            <strong>{{ readiness.embeddingModelReady ? '最近测试通过' : '尚未通过' }}</strong>
+            <strong>{{ verificationLabel(readiness.embeddingModelStatus) }}</strong>
           </div>
           <div class="fact-row">
             <span>最近验证</span>
@@ -77,8 +77,8 @@
               <h2>语义重排模型</h2>
               <p>对 RRF 融合后的候选进行深度相关性重排，是标准语义检索链路的一部分。</p>
             </div>
-            <el-tag :type="statusType(readiness.rerankModelReady)" effect="plain">
-              {{ readiness.rerankModelReady ? '已验证可用' : '尚未就绪' }}
+            <el-tag :type="statusType(readiness.rerankModelStatus)" effect="plain">
+              {{ statusLabel(readiness.rerankModelStatus) }}
             </el-tag>
           </div>
           <div class="fact-row">
@@ -87,7 +87,7 @@
           </div>
           <div class="fact-row">
             <span>真实可用性验证</span>
-            <strong>{{ readiness.rerankModelReady ? '最近测试通过' : '尚未通过' }}</strong>
+            <strong>{{ verificationLabel(readiness.rerankModelStatus) }}</strong>
           </div>
           <div class="fact-row">
             <span>最近验证</span>
@@ -115,7 +115,7 @@
   import { onMounted, reactive, ref } from 'vue';
   import { useRouter } from 'vue-router';
   import BaseLayout from '@/layouts/BaseLayout.vue';
-  import modelConfigService from '@/services/modelConfig';
+  import modelConfigService, { type ModelReadinessStatus } from '@/services/modelConfig';
 
   const router = useRouter();
   const loading = ref(false);
@@ -123,12 +123,15 @@
   const readiness = reactive({
     chatModelConfigured: false,
     chatModelReady: false,
+    chatModelStatus: 'NOT_CONFIGURED' as ModelReadinessStatus,
     chatModelLastValidationTime: undefined as string | undefined,
     embeddingModelConfigured: false,
     embeddingModelReady: false,
+    embeddingModelStatus: 'NOT_CONFIGURED' as ModelReadinessStatus,
     embeddingModelLastValidationTime: undefined as string | undefined,
     rerankModelConfigured: false,
     rerankModelReady: false,
+    rerankModelStatus: 'NOT_CONFIGURED' as ModelReadinessStatus,
     rerankModelLastValidationTime: undefined as string | undefined,
     ready: false,
   });
@@ -145,7 +148,29 @@
     }
   };
 
-  const statusType = (ready: boolean) => (ready ? 'success' : 'warning');
+  const statusLabel = (status: ModelReadinessStatus) =>
+    ({
+      NOT_CONFIGURED: '未配置',
+      CONFIGURED: '待验证',
+      VERIFIED: '当前可用',
+      STALE: '验证已过期',
+      UNAVAILABLE: '当前不可用',
+    })[status];
+
+  const verificationLabel = (status: ModelReadinessStatus) =>
+    ({
+      NOT_CONFIGURED: '尚未配置',
+      CONFIGURED: '尚未完成真实调用验证',
+      VERIFIED: '最近验证仍在有效期内',
+      STALE: '历史测试通过，但需要重新验证',
+      UNAVAILABLE: '最近一次真实调用失败',
+    })[status];
+
+  const statusType = (status: ModelReadinessStatus) => {
+    if (status === 'VERIFIED') return 'success';
+    if (status === 'UNAVAILABLE') return 'danger';
+    return 'warning';
+  };
   const formatTime = (value?: string) =>
     value ? new Date(value.replace(' ', 'T')).toLocaleString('zh-CN') : '尚无验证记录';
 

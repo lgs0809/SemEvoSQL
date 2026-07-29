@@ -31,9 +31,7 @@
         <strong>平台当前处于降级模式</strong>
         <span>{{ degradedMessage }}</span>
       </div>
-      <el-button v-if="canAdmin" size="small" @click="router.push('/admin/models')">
-        模型设置
-      </el-button>
+      <el-button size="small" @click="router.push('/admin/models')">模型设置</el-button>
     </div>
     <main class="page-content"><slot /></main>
   </div>
@@ -46,43 +44,18 @@
 
   const router = useRouter();
   const route = useRoute();
-  const operator = ref();
-  const operatorError = ref('');
   const readiness = ref();
   const readinessError = ref('');
-  const roleRank = { VIEWER: 0, EDITOR: 1, REVIEWER: 2, PUBLISHER: 3, ADMIN: 4 };
   const navigation = [
     { label: '项目', path: '/projects', icon: 'bi bi-folder2-open', modules: ['project'] },
     { label: '问数中心', path: '/chat', icon: 'bi bi-chat-square-text', modules: ['chat'] },
-    {
-      label: '数据连接',
-      path: '/connections',
-      icon: 'bi bi-database',
-      modules: ['connections'],
-      minimumRole: 'EDITOR',
-    },
-    {
-      label: '管理',
-      path: '/admin/models',
-      icon: 'bi bi-gear',
-      modules: ['admin'],
-      minimumRole: 'ADMIN',
-    },
+    { label: '数据连接', path: '/connections', icon: 'bi bi-database', modules: ['connections'] },
+    { label: '管理', path: '/admin/models', icon: 'bi bi-gear', modules: ['admin'] },
   ];
 
-  const hasRole = minimumRole => {
-    if (!minimumRole) return true;
-    if (!operator.value) return false;
-    return (
-      (roleRank[operator.value.role] ?? -1) >= (roleRank[minimumRole] ?? Number.MAX_SAFE_INTEGER)
-    );
-  };
-  const visibleNavigation = computed(() => navigation.filter(item => hasRole(item.minimumRole)));
-  const canAdmin = computed(() => hasRole('ADMIN'));
+  const visibleNavigation = computed(() => navigation);
   const isActive = modules => modules.includes(route.meta.module);
   const degradedMessage = computed(() => {
-    if (operatorError.value)
-      return '本机运行上下文暂时不可用；管理和写操作会保持关闭，服务端仍会继续校验权限。';
     if (readinessError.value)
       return '模型能力状态暂时无法读取；项目、历史结果和管理页面仍可继续访问。';
     if (!readiness.value || readiness.value.ready) return '';
@@ -94,18 +67,11 @@
   });
 
   onMounted(async () => {
-    const [operatorResult, readinessResult] = await Promise.allSettled([
-      platformContext.operator(),
-      platformContext.readiness(true),
-    ]);
-    if (operatorResult.status === 'fulfilled') operator.value = operatorResult.value;
-    else operatorError.value = '本机运行上下文不可用';
-    if (readinessResult.status === 'fulfilled') readiness.value = readinessResult.value;
-    else
-      readinessError.value =
-        readinessResult.reason instanceof Error
-          ? readinessResult.reason.message
-          : '平台能力状态不可用';
+    try {
+      readiness.value = await platformContext.readiness(true);
+    } catch (cause) {
+      readinessError.value = cause instanceof Error ? cause.message : '平台能力状态不可用';
+    }
   });
 </script>
 
