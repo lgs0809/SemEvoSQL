@@ -1,0 +1,58 @@
+name: Bug report
+description: Report a reproducible SemEvoSQL product or runtime defect
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For suspected security vulnerabilities, do not use this form. Follow SECURITY.md and report privately through GitHub Security Advisories.
+  - type: input
+    id: version
+    attributes:
+      label: SemEvoSQL version
+      placeholder: 1.0.0 or commit SHA
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Web Console
+        - Semantic planning / retrieval
+        - SQL preflight / execution
+        - Run / diagnosis / evolution
+        - MCP
+        - Authentication / authorization
+        - Deployment / Docker
+        - Database migration
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Observed behavior
+      description: Describe what happened and the user or operational impact.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Provide the smallest reproducible flow. Remove credentials and business-sensitive data.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, JDK, Node, database, browser, deployment mode, and relevant non-secret configuration.

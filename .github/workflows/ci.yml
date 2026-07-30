@@ -1,0 +1,187 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: Release hygiene
+        run: ./scripts/check-release-hygiene.sh
+      - name: Backend verify
+        run: ./mvnw -s .github/maven-settings.xml -pl backend -am verify
+      - name: Verify v1.0.0 migration baseline
+        run: sh scripts/verify-migration-baseline.sh
+      - name: Verify database upgrade matrix
+        run: bash scripts/verify-db-upgrade-matrix.sh
+      - name: Preserve failed backend test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-reports-${{ github.run_attempt }}
+          path: |
+            backend/target/surefire-reports/
+            backend/target/failsafe-reports/
+          if-no-files-found: ignore
+          retention-days: 10
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.13.0'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: |
+          set -o pipefail
+          mkdir -p ci-results
+          npm ci 2>&1 | tee ci-results/npm-ci.log
+      - name: Verify frontend
+        run: |
+          set -o pipefail
+          npm run verify 2>&1 | tee ci-results/npm-verify.log
+      - name: Audit frontend dependencies
+        run: |
+          set -o pipefail
+          npm audit --audit-level=high 2>&1 | tee ci-results/npm-audit.log
+      - name: Preserve failed frontend checks
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-check-logs-${{ github.run_attempt }}
+          path: frontend/ci-results/
+          if-no-files-found: ignore
+          retention-days: 10
+
+  docker-release-smoke:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    env:
+      SEMEVOSQL_COMPOSE_PROJECT_NAME: semevosql-ci-${{ github.run_id }}
+      SEMEVOSQL_METADATA_VOLUME: semevosql-ci-${{ github.run_id }}-metadata
+      SEMEVOSQL_UPLOADS_VOLUME: semevosql-ci-${{ github.run_id }}-uploads
+      SEMEVOSQL_NETWORK_NAME: semevosql-ci-${{ github.run_id }}-network
+      SEMEVOSQL_BACKEND_PORT: '28065'
+      SEMEVOSQL_FRONTEND_PORT: '23000'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.13.0'
+      - name: Create ephemeral deployment environment
+        run: ./scripts/init-deployment-env.sh
+      - name: Validate Compose
+        run: >-
+          docker compose
+          --env-file deploy/semevosql/.env
+          -f deploy/semevosql/docker-compose.yml
+          --profile app config --quiet
+      - name: Reject non-loopback exposure by default
+        run: |
+          if SEMEVOSQL_BIND_HOST=0.0.0.0 ./scripts/start-semevosql.sh; then
+            echo "Non-loopback exposure was unexpectedly accepted" >&2
+            exit 1
+          fi
+      - name: Build and start portable deployment
+        env:
+          SEMEVOSQL_BUILD: 'true'
+          SEMEVOSQL_STARTUP_TIMEOUT: '240'
+        run: ./scripts/start-semevosql.sh
+      - name: Verify backend and frontend
+        run: |
+          curl -fsS http://127.0.0.1:28065/actuator/health
+          curl -fsS http://127.0.0.1:28065/api/semevosql/operator-context | grep -q 'SELF_HOSTED_SINGLE_USER'
+          curl -fsS http://127.0.0.1:23000/semevosql/ >/dev/null
+      - name: Verify shared semantic protocol in deployed image
+        run: |
+          compose=(docker compose --env-file deploy/semevosql/.env -f deploy/semevosql/docker-compose.yml --profile app)
+          backend_id="$("${compose[@]}" ps -q backend)"
+          worker_id="$("${compose[@]}" ps -q execution-worker)"
+          test -n "$backend_id" && test -n "$worker_id"
+          test "$(docker inspect -f '{{.Image}}' "$backend_id")" = "$(docker inspect -f '{{.Image}}' "$worker_id")"
+          artifact_jar="$(mktemp)"
+          trap 'rm -f "$artifact_jar"' EXIT
+          docker cp "$backend_id:/app/semevosql-backend.jar" "$artifact_jar"
+          mkdir -p ci-results
+          python3 - "$artifact_jar" <<'PY' >ci-results/semantic-protocol.json
+          import hashlib, json, sys, zipfile
+          from pathlib import Path
+          schemas = Path('skills/semantic-catalog-init/schemas')
+          required = ('semantic-catalog.schema.json', 'semantic-catalog-1.1.schema.json',
+                      'semantic-catalog-1.2.schema.json', 'source-schema.schema.json')
+          with zipfile.ZipFile(sys.argv[1]) as archive:
+              checked = {}
+              for schema in required:
+                  entry = 'BOOT-INF/classes/semantic-catalog-protocol/' + schema
+                  assert archive.namelist().count(entry) == 1, 'Missing or duplicate protocol: ' + schema
+                  actual = archive.read(entry)
+                  assert actual == (schemas / schema).read_bytes(), 'Protocol content mismatch: ' + schema
+                  checked[schema] = hashlib.sha256(actual).hexdigest()
+          print(json.dumps({'status': 'PASS', 'schemas': checked}, indent=2))
+          PY
+          cat ci-results/semantic-protocol.json
+      - name: Verify hardened execution runtime
+        run: |
+          compose=(docker compose --env-file deploy/semevosql/.env -f deploy/semevosql/docker-compose.yml --profile app)
+          worker_id="$("${compose[@]}" ps -q execution-worker)"
+          test -n "$worker_id"
+          test "$(docker inspect -f '{{.Config.User}}' "$worker_id")" != "0:0"
+          test "$(docker inspect -f '{{.HostConfig.ReadonlyRootfs}}' "$worker_id")" = "true"
+          docker inspect -f '{{json .HostConfig.SecurityOpt}}' "$worker_id" | grep -q 'no-new-privileges:true'
+          test "$("${compose[@]}" port backend 8065)" = "127.0.0.1:28065"
+          test "$("${compose[@]}" port frontend 8080)" = "127.0.0.1:23000"
+          docker run --rm --network none --read-only --user 65534:65534 \
+            semevosql/python-runner:1.0.0 \
+            python3 -c "import numpy, pandas; print('runner-ok')"
+      - name: Browser acceptance
+        env:
+          SEMEVOSQL_WEB_URL: http://127.0.0.1:23000/semevosql
+        run: |
+          set -o pipefail
+          mkdir -p ci-results
+          node frontend/scripts/browser-acceptance.mjs 2>&1 | tee ci-results/browser-acceptance.log
+      - name: Show container logs on failure
+        if: failure()
+        run: >-
+          docker compose
+          --env-file deploy/semevosql/.env
+          -f deploy/semevosql/docker-compose.yml
+          --profile app logs --no-color --tail=200
+      - name: Preserve failed deployment checks
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-check-logs-${{ github.run_attempt }}
+          path: ci-results/
+          if-no-files-found: ignore
+          retention-days: 10
+      - name: Stop deployment
+        if: always()
+        run: >-
+          docker compose
+          --env-file deploy/semevosql/.env
+          -f deploy/semevosql/docker-compose.yml
+          --profile app down -v --remove-orphans
