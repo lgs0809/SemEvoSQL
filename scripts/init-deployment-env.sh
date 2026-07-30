@@ -55,4 +55,4 @@ trap - EXIT
 chmod 600 "$TARGET" 2>/dev/null || true
 
 echo "Created $TARGET"
-echo "Review ports/security settings if needed, then run: ./scripts/start-semevosql.sh"
+echo "Review ports/exposure settings if needed, then run: ./scripts/start-semevosql.sh"

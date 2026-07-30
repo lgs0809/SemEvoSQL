@@ -36,7 +36,7 @@ Open **http://127.0.0.1:23000/semevosql/**, then:
 3. create a project and publish its semantic model;
 4. ask questions in natural language.
 
-SemEvoSQL 1.0 runs as a self-hosted single-user application and does not ship a built-in account or login system. Backend, frontend, and demo database ports bind to `127.0.0.1` by default. The startup script refuses unauthenticated non-loopback exposure unless `SEMEVOSQL_ALLOW_UNAUTHENTICATED_REMOTE=true` is explicitly set after a trusted external access layer has been put in place.
+SemEvoSQL 1.0 runs as a self-hosted single-user application and does not ship a built-in account or login system. Backend, frontend, and demo database ports bind to `127.0.0.1` by default. The startup script refuses non-loopback exposure unless `SEMEVOSQL_ALLOW_REMOTE_BIND=true` is explicitly set after a trusted external access layer has been put in place.
 
 ## Deployment and execution boundary
 

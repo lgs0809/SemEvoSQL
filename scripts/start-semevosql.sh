@@ -59,9 +59,7 @@ export_legacy_alias SEMEVOSQL_DEMO_POSTGRES_READER_PASSWORD QW_POSTGRES_READER_P
 export_legacy_alias SEMEVOSQL_DEMO_POSTGRES_PORT QW_SOURCE_POSTGRES_PORT
 export_legacy_alias SEMEVOSQL_EXECUTION_INTERNAL_TOKEN QUERYWEAVER_EXECUTION_INTERNAL_TOKEN
 export_legacy_alias SEMEVOSQL_SECRET_ENCRYPTION_KEY QUERYWEAVER_SECRET_ENCRYPTION_KEY
-export_legacy_alias SEMEVOSQL_JWT_ISSUER_URI QUERYWEAVER_JWT_ISSUER_URI
 export_legacy_alias SEMEVOSQL_SPRING_PROFILE QUERYWEAVER_SPRING_PROFILE
-export_legacy_alias SEMEVOSQL_SECURITY_ENABLED QUERYWEAVER_SECURITY_ENABLED
 
 effective_env_value() {
   local key="$1"
@@ -80,22 +78,12 @@ effective_env_value() {
 }
 
 bind_host="$(effective_env_value SEMEVOSQL_BIND_HOST 127.0.0.1)"
-security_enabled="$(effective_env_value SEMEVOSQL_SECURITY_ENABLED false)"
-single_user_mode="$(effective_env_value SEMEVOSQL_SINGLE_USER_MODE true)"
-allow_unauthenticated_remote="$(effective_env_value SEMEVOSQL_ALLOW_UNAUTHENTICATED_REMOTE false)"
+allow_remote_bind="$(effective_env_value SEMEVOSQL_ALLOW_REMOTE_BIND false)"
 
-if [[ "$security_enabled" != "true" && "$single_user_mode" != "true" ]]; then
-  echo "SEMEVOSQL_SINGLE_USER_MODE must be true when authenticated security is disabled." >&2
-  exit 1
-fi
-if [[ "$security_enabled" == "true" && "$single_user_mode" == "true" ]]; then
-  echo "SEMEVOSQL_SINGLE_USER_MODE must be false when authenticated security is enabled." >&2
-  exit 1
-fi
-if [[ "$security_enabled" != "true" && "$bind_host" != "127.0.0.1" && "$bind_host" != "localhost" && "$bind_host" != "::1" ]]; then
-  if [[ "$allow_unauthenticated_remote" != "true" ]]; then
-    echo "Refusing unauthenticated remote exposure on SEMEVOSQL_BIND_HOST=$bind_host." >&2
-    echo "Keep SEMEVOSQL_BIND_HOST on loopback or explicitly set SEMEVOSQL_ALLOW_UNAUTHENTICATED_REMOTE=true after adding a trusted external access layer." >&2
+if [[ "$bind_host" != "127.0.0.1" && "$bind_host" != "localhost" && "$bind_host" != "::1" ]]; then
+  if [[ "$allow_remote_bind" != "true" ]]; then
+    echo "Refusing non-loopback exposure on SEMEVOSQL_BIND_HOST=$bind_host." >&2
+    echo "Keep SEMEVOSQL_BIND_HOST on loopback or explicitly set SEMEVOSQL_ALLOW_REMOTE_BIND=true after adding a trusted external access layer." >&2
     exit 1
   fi
 fi
