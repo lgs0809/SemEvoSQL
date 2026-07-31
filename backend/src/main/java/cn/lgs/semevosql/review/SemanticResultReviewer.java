@@ -23,6 +23,7 @@ import cn.lgs.semevosql.review.PostExecutionReview.IssueType;
 import cn.lgs.semevosql.review.PostExecutionReview.ModelEvidence;
 import cn.lgs.semevosql.semantic.application.SemanticDocumentExtractionClient;
 import cn.lgs.semevosql.semantic.domain.SemanticBlueprint;
+import cn.lgs.semevosql.run.RunDeadlineUtil;
 import cn.lgs.semevosql.util.JsonUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.util.ArrayList;
@@ -108,10 +109,20 @@ public class SemanticResultReviewer {
 	public PostExecutionReview review(String question, SemanticBlueprint plan, String sql, ResultSetBO resultSet,
 			String executionPlan, List<String> deterministicErrors, List<String> deterministicWarnings,
 			boolean advancedExecution) {
+		return review(question, plan, sql, resultSet, executionPlan, deterministicErrors, deterministicWarnings,
+				advancedExecution, null);
+	}
+
+	public PostExecutionReview review(String question, SemanticBlueprint plan, String sql, ResultSetBO resultSet,
+			String executionPlan, List<String> deterministicErrors, List<String> deterministicWarnings,
+			boolean advancedExecution, Long runDeadlineEpochMillis) {
 		Set<String> allowedAssetKeys = allowedAssetKeys(plan);
 		String prompt = prompt(question, plan, sql, resultSet, executionPlan, deterministicErrors, deterministicWarnings,
 				allowedAssetKeys, advancedExecution);
-		ModelCallResult call = extractionClient.complete(ModelCallPurpose.SEMANTIC_RESULT_REVIEW, SYSTEM_PROMPT, prompt);
+		ModelCallResult call = runDeadlineEpochMillis == null
+				? extractionClient.complete(ModelCallPurpose.SEMANTIC_RESULT_REVIEW, SYSTEM_PROMPT, prompt)
+				: extractionClient.complete(ModelCallPurpose.SEMANTIC_RESULT_REVIEW, SYSTEM_PROMPT, prompt,
+						RunDeadlineUtil.remaining(runDeadlineEpochMillis));
 		JsonNode root = parseObject(call.response());
 		assertNoForbiddenOutput(root);
 		Decision decision = enumValue(Decision.class, requiredText(root, "decision"), "decision");

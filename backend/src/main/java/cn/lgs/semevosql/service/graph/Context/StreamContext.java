@@ -56,6 +56,9 @@ public class StreamContext {
 
 	private String attemptId;
 
+	/** Absolute deadline of this in-memory execution attempt, never reused by a recovered attempt. */
+	private long deadlineEpochMillis;
+
 	private long episodeStartNanos;
 
 	/**

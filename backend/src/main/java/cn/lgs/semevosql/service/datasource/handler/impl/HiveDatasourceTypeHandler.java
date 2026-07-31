@@ -18,12 +18,10 @@ package cn.lgs.semevosql.service.datasource.handler.impl;
 import cn.lgs.semevosql.enums.BizDataSourceTypeEnum;
 import cn.lgs.semevosql.entity.Datasource;
 import cn.lgs.semevosql.service.datasource.handler.DatasourceTypeHandler;
-import org.springframework.stereotype.Component;
 
 /**
  * Hive 数据源类型处理器
  */
-@Component
 public class HiveDatasourceTypeHandler implements DatasourceTypeHandler {
 
 	@Override

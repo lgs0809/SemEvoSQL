@@ -32,6 +32,8 @@ public class RunNodeEffectService {
 
 	private final RunNodeEffectRepository repository;
 
+	private final RunExecutionFenceService executionFence;
+
 	public Optional<String> completedPayload(String runId, String nodeKey, String inputHash) {
 		if (runId == null || runId.isBlank()) {
 			return Optional.empty();
@@ -41,10 +43,20 @@ public class RunNodeEffectService {
 
 	@Transactional
 	public void recordCompleted(String runId, String nodeKey, String inputHash, String resultJson) {
+		recordCompleted(runId, null, nodeKey, inputHash, resultJson);
+	}
+
+	@Transactional
+	public void recordCompleted(String runId, String attemptId, String nodeKey, String inputHash, String resultJson) {
 		if (runId == null || runId.isBlank()) {
 			return;
 		}
 		repository.lockRun(runId);
+		if (attemptId != null && !attemptId.isBlank()) {
+			// The run row is already locked, so the status/attempt check and this effect write are one atomic
+			// transaction. A terminal transition cannot slip between the check and the insert/replace below.
+			executionFence.assertActive(runId, attemptId);
+		}
 		RunNodeEffect existing = repository.find(runId, nodeKey).orElse(null);
 		if (existing == null) {
 			repository.insertCompleted(new RunNodeEffect(UUID.randomUUID().toString(), runId, nodeKey, inputHash,

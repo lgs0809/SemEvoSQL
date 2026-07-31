@@ -64,15 +64,15 @@ public class QueryRunRepository {
 						(run_id, run_type, project_id, project_version_id, episode_id, attempt_id, thread_id, status,
 						 current_node, last_event_sequence, request_id, idempotency_key, owner_instance, lease_expire_time,
 						 start_time, finish_time, error_code, error_message, revision, request_payload, recovery_payload,
-						 execution_snapshot, create_time, update_time)
-						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+						 execution_snapshot, deadline_epoch_millis, create_time, update_time)
+						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 						ON CONFLICT (idempotency_key) DO NOTHING
 						""",
 				run.runId(), run.runType().name(), run.projectId(), run.projectVersionId(), run.episodeId(),
 				run.attemptId(), run.threadId(), run.status().name(), run.currentNode(), run.lastEventSequence(),
 				run.requestId(), run.idempotencyKey(), run.ownerInstance(), run.leaseExpireTime(), run.startTime(),
 				run.finishTime(), run.errorCode(), run.errorMessage(), run.revision(), run.requestPayload(),
-				run.recoveryPayload(), run.executionSnapshot());
+				run.recoveryPayload(), run.executionSnapshot(), run.deadlineEpochMillis());
 	}
 
 	public int updateRecoveryPayload(String runId, long expectedRevision, String recoveryPayload) {
@@ -267,6 +267,7 @@ public class QueryRunRepository {
 			.requestPayload(rs.getString("request_payload"))
 			.recoveryPayload(rs.getString("recovery_payload"))
 			.executionSnapshot(rs.getString("execution_snapshot"))
+			.deadlineEpochMillis(nullableLong(rs, "deadline_epoch_millis"))
 			.build();
 	}
 

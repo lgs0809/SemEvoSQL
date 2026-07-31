@@ -19,8 +19,6 @@ import cn.lgs.semevosql.common.OperatorContext;
 import cn.lgs.semevosql.project.domain.SemanticProject;
 import cn.lgs.semevosql.project.domain.SemanticProjectRepository;
 import cn.lgs.semevosql.project.domain.SemanticProjectVersion;
-import cn.lgs.semevosql.project.security.ProjectAccessRole;
-import cn.lgs.semevosql.project.security.ProjectAccessService;
 import cn.lgs.semevosql.util.JsonUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.sql.Timestamp;
@@ -45,12 +43,12 @@ public class ProjectReleaseCenterApplicationService {
 
 	private final SemanticProjectRepository repository;
 
-	private final ProjectAccessService projectAccessService;
+	private final ProjectScopeService projectScope;
 
 	private final JdbcTemplate jdbc;
 
 	public ReleaseCenterView getReleaseCenter(Long projectId, OperatorContext operator) {
-		projectAccessService.requireAccess(projectId, operator, ProjectAccessRole.VIEWER);
+		projectScope.requireProject(projectId, operator);
 		SemanticProject project = repository.findProject(projectId)
 			.orElseThrow(() -> new IllegalArgumentException("Project not found: " + projectId));
 		Map<Long, List<VersionActivity>> activities = loadActivities(projectId);
@@ -89,7 +87,7 @@ public class ProjectReleaseCenterApplicationService {
 	private Map<Long, List<VersionActivity>> loadActivities(Long projectId) {
 		Map<Long, List<VersionActivity>> result = new HashMap<>();
 		jdbc.query("""
-				SELECT project_version_id, activity_type, operator_name, operator_role, create_time
+				SELECT project_version_id, activity_type, operator_name, create_time
 				FROM qw_project_version_activity
 				WHERE project_id = ?
 				ORDER BY create_time DESC, id DESC
@@ -97,7 +95,7 @@ public class ProjectReleaseCenterApplicationService {
 				(RowCallbackHandler) rs -> result
 					.computeIfAbsent(rs.getLong("project_version_id"), ignored -> new ArrayList<>())
 					.add(new VersionActivity(rs.getString("activity_type"), rs.getString("operator_name"),
-							rs.getString("operator_role"), timestamp(rs.getTimestamp("create_time")))),
+						timestamp(rs.getTimestamp("create_time")))),
 				projectId);
 		return result;
 	}
@@ -296,8 +294,7 @@ public class ProjectReleaseCenterApplicationService {
 			LocalDateTime createTime, LocalDateTime updateTime) {
 	}
 
-	private record VersionActivity(String activityType, String operatorName, String operatorRole,
-			LocalDateTime createTime) {
+	private record VersionActivity(String activityType, String operatorName, LocalDateTime createTime) {
 	}
 
 }

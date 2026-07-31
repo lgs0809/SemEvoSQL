@@ -15,6 +15,7 @@
  */
 package cn.lgs.semevosql.workflow.node;
 
+import static cn.lgs.semevosql.constant.Constant.ATTEMPT_ID;
 import static cn.lgs.semevosql.constant.Constant.ADVANCED_EXECUTION_FALLBACK;
 import static cn.lgs.semevosql.constant.Constant.FORCE_SEMANTIC_REPLAN;
 import static cn.lgs.semevosql.constant.Constant.LAST_SQL_EXECUTED_STEP;
@@ -59,8 +60,12 @@ import cn.lgs.semevosql.review.QueryRepairPolicy.BudgetDecision;
 import cn.lgs.semevosql.review.QueryRepairPolicy.RepairBudget;
 import cn.lgs.semevosql.review.RetrievalRepairService;
 import cn.lgs.semevosql.review.RetrievalRepairService.RepairQuery;
+import cn.lgs.semevosql.multisource.MultiSourceRunService;
 import cn.lgs.semevosql.run.QueryRunService;
 import cn.lgs.semevosql.run.RunNodeEffectService;
+import cn.lgs.semevosql.run.RunExecutionFenceService;
+import cn.lgs.semevosql.run.LateRunResultDroppedException;
+import cn.lgs.semevosql.run.RunDeadlineExceededException;
 import cn.lgs.semevosql.semantic.application.SemanticPlanningOutcome;
 import cn.lgs.semevosql.semantic.domain.SemanticBlueprint;
 import cn.lgs.semevosql.sql.application.SqlResultValidator.ValidationMode;
@@ -103,10 +108,15 @@ public class PostExecutionReviewNode implements NodeAction {
 
 	private final SemEvoSQLProperties properties;
 
+	private final RunExecutionFenceService executionFence;
+
+	private final MultiSourceRunService multiSourceRunService;
+
 	@Override
 	@SuppressWarnings("unchecked") // Graph state stores typed query maps behind a raw Map class token.
 	public Map<String, Object> apply(OverAllState state) throws Exception {
 		String runId = StateUtil.getStringValue(state, RUN_ID, "");
+		String attemptId = StateUtil.getStringValue(state, ATTEMPT_ID, "");
 		Integer step = StateUtil.getObjectValue(state, LAST_SQL_EXECUTED_STEP, Integer.class,
 				Math.max(0, state.value(PLAN_CURRENT_STEP, 1) - 1));
 		String resultPayload = StateUtil.getStringValue(state, LAST_SQL_RESULT_PAYLOAD, "");
@@ -145,7 +155,7 @@ public class PostExecutionReviewNode implements NodeAction {
 		String completed = runNodeEffectService.completedPayload(runId, effectKey, inputHash).orElse(null);
 		if (completed != null) {
 			PostReviewEffect restored = readEffect(completed);
-			recordEvidence(runId, step, plan, executionPlan, restored.review(), restored.budget(), inputHash);
+			recordEvidence(runId, attemptId, step, plan, executionPlan, restored.review(), restored.budget(), inputHash);
 			return replay(state, restored);
 		}
 
@@ -154,7 +164,9 @@ public class PostExecutionReviewNode implements NodeAction {
 		ReviewMode reviewMode = repairPolicy.semanticReviewAvailable(budget) ? ReviewMode.CONFIGURED
 				: ReviewMode.DETERMINISTIC_ONLY;
 		PostExecutionReview review = reviewService.review(StateUtil.getCanonicalQuery(state), plan, sql, resultSet,
-				properties.getSqlExecution().getMaxRows(), executionPlan, reviewMode, validationMode, dryPlanWarnings);
+				properties.getSqlExecution().getMaxRows(), executionPlan, reviewMode, validationMode, dryPlanWarnings,
+				StateUtil.getObjectValue(state, cn.lgs.semevosql.constant.Constant.RUN_DEADLINE_EPOCH_MILLIS, Long.class,
+						(Long) null));
 		RepairBudget updatedBudget = budget;
 		if (review.semanticReviewerUsed()) {
 			BudgetDecision semanticReviewBudget = repairPolicy.consumeSemanticReview(updatedBudget);
@@ -180,8 +192,8 @@ public class PostExecutionReviewNode implements NodeAction {
 			updatedBudget = transition.budget();
 		}
 		PostReviewEffect effect = new PostReviewEffect(review, updatedBudget, step, resultPayload, sql);
-		runNodeEffectService.recordCompleted(runId, effectKey, inputHash, writeEffect(effect));
-		recordEvidence(runId, step, plan, executionPlan, review, updatedBudget, inputHash);
+		runNodeEffectService.recordCompleted(runId, attemptId, effectKey, inputHash, writeEffect(effect));
+		recordEvidence(runId, attemptId, step, plan, executionPlan, review, updatedBudget, inputHash);
 		return applyEffect(state, effect, false);
 	}
 
@@ -204,6 +216,9 @@ public class PostExecutionReviewNode implements NodeAction {
 
 	private Map<String, Object> applyEffect(OverAllState state, PostReviewEffect effect, boolean replay) {
 		PostExecutionReview review = effect.review();
+		if (review.decision() == Decision.PASS) {
+			persistDirectArtifactIfNeeded(state, effect);
+		}
 		Map<String, Object> update = new HashMap<>();
 		update.put(POST_EXECUTION_REVIEW_OUTPUT, review);
 		update.put(QUERY_REPAIR_BUDGET, effect.budget());
@@ -282,6 +297,24 @@ public class PostExecutionReviewNode implements NodeAction {
 		return Map.of(POST_EXECUTION_REVIEW_OUTPUT, generator);
 	}
 
+	private void persistDirectArtifactIfNeeded(OverAllState state, PostReviewEffect effect) {
+		String runId = StateUtil.getStringValue(state, RUN_ID, "");
+		String attemptId = StateUtil.getStringValue(state, ATTEMPT_ID, "");
+		if (runId.isBlank() || multiSourceRunService.mergedArtifact(runId).isPresent()) {
+			return;
+		}
+		try {
+			ResultBO result = JsonUtil.getObjectMapper().readValue(effect.resultPayload(), ResultBO.class);
+			multiSourceRunService.persistDirectResult(runId, result.getResultSet(), attemptId);
+		}
+		catch (LateRunResultDroppedException | RunDeadlineExceededException late) {
+			throw late;
+		}
+		catch (Exception ex) {
+			throw new PostExecutionReviewFailedException("Unable to persist validated result artifact: " + ex.getMessage());
+		}
+	}
+
 	private void handleRetrievalRepair(OverAllState state, Map<String, Object> update, PostReviewEffect effect) {
 		RepairQuery repair = retrievalRepairService.build(StateUtil.getCanonicalQuery(state), List.of(), effect.review());
 		update.put(PLAN_CURRENT_STEP, effect.step());
@@ -345,21 +378,27 @@ public class PostExecutionReviewNode implements NodeAction {
 		return values.stream().map(Objects::toString).filter(value -> !value.isBlank()).distinct().toList();
 	}
 
-	private void recordEvidence(String runId, int step, SemanticBlueprint plan, String executionPlan,
+	private void recordEvidence(String runId, String attemptId, int step, SemanticBlueprint plan, String executionPlan,
 			PostExecutionReview review, RepairBudget budget, String inputHash) {
 		if (runId == null || runId.isBlank()) {
 			return;
 		}
 		try {
+			if (attemptId != null && !attemptId.isBlank()) {
+				executionFence.assertActive(runId, attemptId);
+			}
 			Map<String, Object> payload = new LinkedHashMap<>();
 			payload.put("step", step);
 			payload.put("review", review);
 			payload.put("repairBudget", budget);
 			payload.put("typedPlan", plan);
 			payload.put("executionPlan", executionPlan == null ? "" : executionPlan);
-			queryRunService.appendEvent(runId, "POST_EXECUTION_REVIEW", "post-execution-review",
+			queryRunService.appendEvent(runId, attemptId, "POST_EXECUTION_REVIEW", "post-execution-review",
 					JsonUtil.getObjectMapper().writeValueAsString(payload), "Post-execution review " + review.decision(),
 					"post-review:" + step + ":" + inputHash);
+		}
+		catch (LateRunResultDroppedException | RunDeadlineExceededException ex) {
+			throw ex;
 		}
 		catch (Exception ex) {
 			log.warn("Unable to append post-execution review evidence for run {}: {}", runId, ex.getMessage());

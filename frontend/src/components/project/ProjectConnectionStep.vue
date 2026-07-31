@@ -42,10 +42,10 @@
             <el-option
               v-for="datasource in availableDatasources"
               :key="datasource.id"
-              :label="`${datasource.name || `连接 ${datasource.id}`} · ${datasource.type || '-'}`"
+              :label="`${datasourceDisplayName(datasource)} · ${datasourceTypeLabel(datasource.type)}`"
               :value="datasource.id"
             >
-              <span>{{ datasource.name || `连接 ${datasource.id}` }}</span>
+              <span>{{ datasourceDisplayName(datasource) }}</span>
               <span class="option-meta">
                 {{ datasource.testStatus === 'success' ? '已测试' : '待测试' }}
               </span>
@@ -66,7 +66,7 @@
         </div>
       </div>
 
-      <el-form-item label="参与问数的表" required>
+      <el-form-item label="供查询使用的表" required>
         <div v-loading="item.loadingTables" class="table-scope">
           <div v-if="item.tableOptions.length" class="table-toolbar">
             <span>
@@ -117,6 +117,7 @@
   import DataConnectionDialog from '@/components/datasource/DataConnectionDialog.vue';
   import datasourceService, { type Datasource } from '@/services/datasource';
   import { getApiErrorMessage } from '@/services/common';
+  import { datasourceDisplayName, datasourceTypeLabel } from '@/services/displayLabels';
 
   interface DatasourceBindingDraft {
     key: number;
@@ -151,8 +152,8 @@
     domainCode: props.businessDomain || props.projectCode || 'business',
     domainName: props.projectName || props.businessDomain || '业务数据',
     responsibility: props.projectName
-      ? `提供${props.projectName}问数所需业务数据`
-      : '提供项目问数所需业务数据',
+      ? `为${props.projectName}查询提供业务数据`
+      : '为项目查询提供业务数据',
     priority: 100,
     exposedTables: [],
     tableOptions: [],
@@ -172,7 +173,7 @@
   const selectDatasource = async (item: DatasourceBindingDraft) => {
     const datasource = selectedDatasource(item);
     if (datasource) {
-      item.responsibility = item.responsibility || `${datasource.name || '该连接'}提供项目查询数据`;
+      item.responsibility = item.responsibility || `${datasourceDisplayName(datasource)}提供项目查询数据`;
     }
     await loadTables(item);
   };

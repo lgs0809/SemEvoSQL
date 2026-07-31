@@ -34,6 +34,8 @@ import cn.lgs.semevosql.semantic.application.SemanticBlueprintGenerationService.
 import cn.lgs.semevosql.semantic.application.SemanticBlueprintGenerationService.PlannerProfile;
 import cn.lgs.semevosql.semantic.application.SemanticBlueprintPipeline.PlanningRequest;
 import cn.lgs.semevosql.semantic.application.SemanticCatalogApplicationService.PlanningRecall;
+import cn.lgs.semevosql.semantic.domain.ComputationIntent;
+import cn.lgs.semevosql.semantic.domain.ComputationIntent.Capability;
 import cn.lgs.semevosql.semantic.domain.SemanticAssetStatus;
 import cn.lgs.semevosql.semantic.domain.SemanticBlueprint;
 import cn.lgs.semevosql.semantic.domain.SemanticCandidateSet;
@@ -44,6 +46,39 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class SemanticBlueprintPipelineTest {
+
+	@Test
+	void periodComparisonBaselineDoesNotBecomeRelativeObservationFilter() {
+		SemanticBlueprint plan = SemanticBlueprint.builder()
+			.timeRange(SemanticBlueprint.TimeRangeSelection.builder()
+				.modelCode("orders")
+				.timeColumn("paid_at")
+				.relativeExpression("PREVIOUS_MONTH")
+				.granularity("MONTH")
+				.build())
+			.build();
+
+		SemanticBlueprintPipeline.reconcileComputationIntent(plan,
+				new ComputationIntent(Set.of(Capability.PERIOD_COMPARISON, Capability.TIME_BUCKET)));
+
+		assertThat(plan.getTimeRange()).isNull();
+	}
+
+	@Test
+	void explicitObservationFilterIsPreservedAlongsidePeriodComparison() {
+		SemanticBlueprint.TimeRangeSelection timeRange = SemanticBlueprint.TimeRangeSelection.builder()
+			.modelCode("orders")
+			.timeColumn("paid_at")
+			.relativeExpression("PREVIOUS_MONTH")
+			.granularity("MONTH")
+			.build();
+		SemanticBlueprint plan = SemanticBlueprint.builder().timeRange(timeRange).build();
+
+		SemanticBlueprintPipeline.reconcileComputationIntent(plan,
+				new ComputationIntent(Set.of(Capability.PERIOD_COMPARISON, Capability.TIME_FILTER)));
+
+		assertThat(plan.getTimeRange()).isSameAs(timeRange);
+	}
 
 	@Test
 	void deterministicResolutionFailureGetsOneGovernedSemanticRepair() {

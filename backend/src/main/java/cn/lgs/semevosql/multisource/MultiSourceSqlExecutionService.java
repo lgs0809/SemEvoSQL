@@ -21,6 +21,8 @@ import cn.lgs.semevosql.connector.DbQueryParameter;
 import cn.lgs.semevosql.connector.accessor.Accessor;
 import cn.lgs.semevosql.operations.SemEvoSQLProductionService;
 import cn.lgs.semevosql.operations.SemEvoSQLProductionService.SqlTraceRequest;
+import cn.lgs.semevosql.run.LateRunResultDroppedException;
+import cn.lgs.semevosql.run.RunDeadlineExceededException;
 import cn.lgs.semevosql.properties.SemEvoSQLProperties;
 import cn.lgs.semevosql.operations.SemanticCatalogCache;
 import cn.lgs.semevosql.semantic.compiler.SqlDialect;
@@ -293,7 +295,10 @@ public class MultiSourceSqlExecutionService {
 			productionService.recordSqlTrace(attemptId,
 					new SqlTraceRequest(traceKey, sql, Map.copyOf(guardSummary), Map.copyOf(costSummary),
 							Map.copyOf(explainSummary), Map.copyOf(previewSummary), Map.copyOf(resultSummary), status, 0,
-							Math.max(0, (System.nanoTime() - startNanos) / 1_000_000), errorType));
+					Math.max(0, (System.nanoTime() - startNanos) / 1_000_000), errorType));
+		}
+		catch (LateRunResultDroppedException | RunDeadlineExceededException late) {
+			throw late;
 		}
 		catch (RuntimeException traceError) {
 			log.warn("Unable to persist verified SQL trace for attempt {}: {}", attemptId, traceError.getMessage());

@@ -9,8 +9,6 @@ const apiBase = '/api/semevosql';
 export interface ProjectMcpDeployment {
   deploymentId: string;
   projectId: number;
-  projectVersionId: number;
-  catalogHash: string;
   principalId: string;
   status: 'RUNNING' | 'DISABLED' | 'REVOKED';
   endpoint: string;

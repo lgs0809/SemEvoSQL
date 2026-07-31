@@ -123,9 +123,23 @@ public class SemEvoSQLModelGateway {
 	/** Executes a governed call with an explicit per-call profile, used by paired planner ablations. */
 	public ModelCallResult complete(ModelCallPurpose purpose, String systemPrompt, String userPrompt,
 			LlmInvocationOptions requestedOptions) {
+		return complete(purpose, systemPrompt, userPrompt, requestedOptions, totalTimeout);
+	}
+
+	/**
+	 * Executes one governed model call within the caller's remaining operation budget.
+	 *
+	 * <p>The caller budget may only tighten the gateway defaults; it can never extend the configured transport timeout.
+	 * Multi-call semantic planning therefore shares one outer deadline instead of granting every repair a fresh full
+	 * transport timeout.</p>
+	 */
+	public ModelCallResult complete(ModelCallPurpose purpose, String systemPrompt, String userPrompt,
+			LlmInvocationOptions requestedOptions, Duration callBudget) {
 		BlockingExecutionGuard.assertBlockingAllowed("model-gateway.complete");
 		ModelCallPurpose effectivePurpose = purpose == null ? ModelCallPurpose.OTHER : purpose;
 		LlmInvocationOptions effectiveOptions = requestedOptions == null ? LlmInvocationOptions.none() : requestedOptions;
+		Duration callerTimeout = boundedTimeout(totalTimeout, callBudget);
+		Duration effectivePermitTimeout = boundedTimeout(permitTimeout, callerTimeout);
 		assertCircuitClosed();
 		boolean acquired = false;
 		long started = System.nanoTime();
@@ -140,10 +154,12 @@ public class SemEvoSQLModelGateway {
 			downgradeReason.set("LLM_SERVICE_OPTIONS_UNSUPPORTED");
 		}
 		try {
-			acquired = permits.tryAcquire(permitTimeout.toMillis(), TimeUnit.MILLISECONDS);
+			acquired = permits.tryAcquire(effectivePermitTimeout.toMillis(), TimeUnit.MILLISECONDS);
 			if (!acquired) {
 				throw new ModelCapacityException("Model gateway concurrency limit is saturated");
 			}
+			Duration effectiveTotalTimeout = remainingTimeout(callerTimeout, started);
+			Duration effectiveAttemptTimeout = boundedTimeout(attemptTimeout, effectiveTotalTimeout);
 			String response = Flux.defer(() -> {
 					attempts.incrementAndGet();
 					Flux<ChatResponse> responses = optionsApplied.get()
@@ -164,11 +180,12 @@ public class SemEvoSQLModelGateway {
 				.collect(StringBuilder::new, StringBuilder::append)
 				.map(StringBuilder::toString)
 				.map(this::requireNonEmptyResponse)
-				.timeout(attemptTimeout)
+				.timeout(effectiveAttemptTimeout)
 				.retryWhen(Retry.fixedDelay(maxRetries, retryDelay)
 					.filter(this::isTransientModelFailure)
 					.onRetryExhaustedThrow((spec, signal) -> signal.failure()))
-				.block(totalTimeout);
+				.timeout(effectiveTotalTimeout)
+				.block(effectiveTotalTimeout.plusMillis(250));
 			if (response == null) {
 				throw new TransientModelException("Model returned no terminal response");
 			}
@@ -209,11 +226,31 @@ public class SemEvoSQLModelGateway {
 		}
 	}
 
+	private Duration boundedTimeout(Duration configured, Duration requested) {
+		Duration safeConfigured = configured == null || configured.isZero() || configured.isNegative() ? Duration.ofMillis(1)
+				: configured;
+		if (requested == null || requested.isZero() || requested.isNegative()) {
+			return Duration.ofMillis(1);
+		}
+		return requested.compareTo(safeConfigured) < 0 ? requested : safeConfigured;
+	}
+
+	private Duration remainingTimeout(Duration original, long startedNanos) {
+		long elapsedNanos = Math.max(0L, System.nanoTime() - startedNanos);
+		long remainingNanos = Math.max(1L, original.toNanos() - elapsedNanos);
+		return Duration.ofNanos(remainingNanos);
+	}
+
 	private LlmInvocationOptions defaultInvocationOptions(ModelCallPurpose purpose) {
 		if (purpose != ModelCallPurpose.SEMANTIC_PLANNING || !reasoningProperties.isEnabled()) {
 			return LlmInvocationOptions.none();
 		}
 		return new LlmInvocationOptions(reasoningProperties.getModelOverride(), reasoningProperties.getEffort());
+	}
+
+	/** Exposes the configured purpose profile to adapters that also supply a caller deadline. */
+	public LlmInvocationOptions defaultOptionsFor(ModelCallPurpose purpose) {
+		return defaultInvocationOptions(purpose);
 	}
 
 	private boolean isUnsupportedReasoningFailure(Throwable failure) {

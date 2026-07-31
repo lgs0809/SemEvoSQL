@@ -17,7 +17,6 @@ package cn.lgs.semevosql.evolution;
 
 import cn.lgs.semevosql.connector.JdbcStatementCancellationRegistry;
 import cn.lgs.semevosql.common.OperatorContext;
-import cn.lgs.semevosql.common.OperatorRole;
 import cn.lgs.semevosql.common.json.JsonPayloadRegistry;
 import cn.lgs.semevosql.common.json.VersionedJson;
 import cn.lgs.semevosql.evolution.SemanticEvolutionStateMachine.CandidateStatus;
@@ -44,6 +43,7 @@ import java.util.concurrent.RejectedExecutionException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -77,6 +77,13 @@ public class SemanticReplayCoordinator {
 	private final VersionedJson versionedJson = new VersionedJson();
 
 	private final java.util.Set<String> scheduled = ConcurrentHashMap.newKeySet();
+
+	private ApplicationEventPublisher eventPublisher;
+
+	@Autowired
+	public void setEventPublisher(ApplicationEventPublisher eventPublisher) {
+		this.eventPublisher = eventPublisher;
+	}
 
 	@Autowired
 	public SemanticReplayCoordinator(JdbcTemplate jdbc, QueryRunService runService, SemanticReplayService replayService,
@@ -271,12 +278,16 @@ public class SemanticReplayCoordinator {
 					"replay-succeeded:" + jobId);
 			Map<String, Object> candidate = one("SELECT * FROM qw_semantic_evolution_candidate WHERE id = ?",
 					text(job.get("candidate_id")));
-			OperatorContext system = new OperatorContext("semevosql-system", OperatorRole.ADMIN, "RECOVERY_WORKER",
+			OperatorContext system = new OperatorContext("semevosql-system", "RECOVERY_WORKER",
 					runId, "semantic-replay-complete:" + jobId);
-			auditService.append(text(job.get("candidate_id")), "REPLAY_COMPLETED", "REPLAY_RUNNING",
+			String candidateId = text(job.get("candidate_id"));
+			auditService.append(candidateId, "REPLAY_COMPLETED", "REPLAY_RUNNING",
 					summary.allPassed() ? "REPLAY_PASSED" : "REPLAY_FAILED", system,
 					number(candidate.get("source_version_id")), number(candidate.get("target_draft_version_id")),
 					text(candidate.get("patch_hash")), runId, Map.of("replayRunId", jobId), summary);
+			if (summary.allPassed() && eventPublisher != null) {
+				eventPublisher.publishEvent(new LowRiskSemanticEvolutionReplayPassedEvent(candidateId));
+			}
 		}
 		catch (ReplayCancelledException ex) {
 			acknowledgeWorkerCancellation(jobId, runId);

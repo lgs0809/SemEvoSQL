@@ -7,8 +7,10 @@
     <section class="project-page">
       <div class="page-heading">
         <div>
-          <h1>数据项目</h1>
-          <p>查看哪些项目已经可以问数、哪些还需要处理，并从最重要的下一步继续。</p>
+          <h1>项目工作台</h1>
+          <p>
+            每个项目包含一套数据连接、业务模型和可追溯的查询历史。选择一个项目，继续建设模型或打开查询工作台。
+          </p>
         </div>
         <el-button
           v-if="canCreateProject"
@@ -22,21 +24,33 @@
       </div>
 
       <div class="summary-grid">
-        <el-card shadow="never">
+        <el-card shadow="never" class="summary-card summary-card-neutral">
+          <div class="summary-icon"><i class="bi bi-grid-1x2"></i></div>
           <strong>{{ projects.length }}</strong>
           <span>项目总数</span>
+          <small>当前工作区全部项目</small>
         </el-card>
-        <el-card shadow="never">
+        <el-card shadow="never" class="summary-card summary-card-success">
+          <div class="summary-icon"><i class="bi bi-check2-circle"></i></div>
           <strong>{{ readyCount }}</strong>
-          <span>可直接问数</span>
+          <span>模型已发布</span>
+          <small>已具备查询入口</small>
         </el-card>
-        <el-card shadow="never">
+        <el-card shadow="never" class="summary-card summary-card-warning">
+          <div class="summary-icon"><i class="bi bi-cone-striped"></i></div>
           <strong>{{ buildingCount }}</strong>
-          <span>仍需准备</span>
+          <span>正在建设</span>
+          <small>还有准备步骤待完成</small>
         </el-card>
-        <el-card shadow="never" :class="{ 'has-warning': unknownCount > 0 }">
+        <el-card
+          shadow="never"
+          class="summary-card summary-card-danger"
+          :class="{ 'has-warning': unknownCount > 0 }"
+        >
+          <div class="summary-icon"><i class="bi bi-exclamation-circle"></i></div>
           <strong>{{ unknownCount }}</strong>
-          <span>状态暂不可用</span>
+          <span>状态需检查</span>
+          <small>健康状态暂时无法读取</small>
         </el-card>
       </div>
 
@@ -78,7 +92,7 @@
 
         <el-empty
           v-if="!loading && !listError && projects.length === 0"
-          description="还没有数据项目。连接数据库后，SemEvoSQL 会自动理解结构并只追问必要的业务规则。"
+          description="还没有数据项目。创建项目并连接数据库，系统会从真实结构开始建立业务模型。"
         >
           <el-button
             v-if="canCreateProject"
@@ -86,38 +100,41 @@
             :icon="Plus"
             @click="router.push('/projects/create')"
           >
-            创建第一个数据项目
+            创建第一个项目
           </el-button>
         </el-empty>
 
-        <el-table
+        <div
           v-else-if="projects.length > 0"
-          v-loading="loading"
-          :data="displayedProjects"
-          empty-text="没有匹配的项目"
+          class="project-table-scroll"
+          role="region"
+          aria-label="项目列表"
+          tabindex="0"
         >
-          <el-table-column label="项目" min-width="260">
+          <el-table v-loading="loading" :data="displayedProjects" empty-text="没有匹配的项目">
+          <el-table-column label="项目" min-width="220">
             <template #default="scope">
               <button class="project-link" @click="openProject(scope.row.id)">
                 {{ scope.row.name }}
               </button>
               <div class="subtle">{{ scope.row.description || scope.row.businessDomain }}</div>
+              <div class="subtle project-updated">最近更新：{{ formatTime(scope.row.updateTime) }}</div>
             </template>
           </el-table-column>
-          <el-table-column label="问数状态" width="170">
+          <el-table-column label="查询入口" width="165">
             <template #default="scope">
               <template v-if="health(scope.row.id)">
                 <el-tag
                   :type="health(scope.row.id)?.queryReady ? 'success' : 'warning'"
                   effect="plain"
                 >
-                  {{ health(scope.row.id)?.queryReady ? '可以问数' : '仍在准备' }}
+                  {{ health(scope.row.id)?.queryReady ? '查询入口已就绪' : '业务模型待发布' }}
                 </el-tag>
                 <div class="subtle version-copy">
                   {{
                     health(scope.row.id)?.activeVersion?.versionNumber
-                      ? `业务模型 v${health(scope.row.id)?.activeVersion?.versionNumber}`
-                      : '尚无正式业务模型'
+                    ? `当前业务模型 v${health(scope.row.id)?.activeVersion?.versionNumber}`
+                    : '尚未发布业务模型'
                   }}
                 </div>
               </template>
@@ -129,7 +146,7 @@
               </template>
             </template>
           </el-table-column>
-          <el-table-column label="当前最重要的下一步" min-width="270">
+          <el-table-column label="当前最重要的下一步" min-width="220">
             <template #default="scope">
               <template v-if="health(scope.row.id)?.nextAction">
                 <strong class="next-action">
@@ -141,12 +158,12 @@
               <span v-else class="subtle">项目状态暂不可用</span>
             </template>
           </el-table-column>
-          <el-table-column label="近期问数" width="170">
+          <el-table-column label="历史查询" width="150">
             <template #default="scope">
               <template v-if="(health(scope.row.id)?.totalQueries || 0) > 0">
                 <strong>{{ percent(health(scope.row.id)?.querySuccessRate) }}</strong>
                 <div class="subtle">
-                  {{ health(scope.row.id)?.totalQueries }} 次 ·
+                  {{ health(scope.row.id)?.totalQueries }} 次执行 ·
                   {{ health(scope.row.id)?.correctionCount }} 次纠错
                 </div>
               </template>
@@ -154,12 +171,9 @@
               <span v-else class="subtle">项目状态暂不可用</span>
             </template>
           </el-table-column>
-          <el-table-column label="最近更新" width="190">
-            <template #default="scope">{{ formatTime(scope.row.updateTime) }}</template>
-          </el-table-column>
-          <el-table-column label="操作" width="200" fixed="right">
+          <el-table-column label="操作" width="175">
             <template #default="scope">
-              <el-button link type="primary" @click="openProject(scope.row.id)">进入项目</el-button>
+              <el-button link type="primary" @click="openProject(scope.row.id)">打开项目</el-button>
               <el-button
                 v-if="health(scope.row.id)"
                 link
@@ -177,7 +191,8 @@
               </el-button>
             </template>
           </el-table-column>
-        </el-table>
+          </el-table>
+        </div>
       </el-card>
     </section>
   </BaseLayout>
@@ -189,7 +204,6 @@
   import { ElMessage } from 'element-plus';
   import { Plus, Refresh, Search } from '@element-plus/icons-vue';
   import BaseLayout from '@/layouts/BaseLayout.vue';
-  import { platformContext } from '@/services/platformContext';
   import { projectListAction } from '@/services/projectCapabilities.mjs';
   import {
     semEvoSQLService,
@@ -204,19 +218,18 @@
 
   const healthByProject = ref<Record<number, ProjectHealthSummary>>({});
   const healthFailureIds = ref<Set<number>>(new Set());
-  const operatorRole = ref<'VIEWER' | 'EDITOR' | 'REVIEWER' | 'PUBLISHER' | 'ADMIN'>('VIEWER');
   const listError = ref('');
   const keyword = ref('');
   const statusFilter = ref<StatusFilter>('ALL');
   const statusFilterOptions: Array<{ label: string; value: StatusFilter }> = [
     { label: '全部', value: 'ALL' },
     { label: '待处理', value: 'ACTION' },
-    { label: '可问数', value: 'READY' },
+    { label: '已发布模型', value: 'READY' },
     { label: '状态异常', value: 'UNKNOWN' },
   ];
   const loading = ref(false);
 
-  const canCreateProject = computed(() => operatorRole.value !== 'VIEWER');
+  const canCreateProject = computed(() => true);
   const readyCount = computed(
     () => projects.value.filter(item => healthByProject.value[item.id]?.queryReady).length,
   );
@@ -267,13 +280,11 @@
     loading.value = true;
     listError.value = '';
     try {
-      const [nextProjects, summaries, operator] = await Promise.all([
+      const [nextProjects, summaries] = await Promise.all([
         semEvoSQLService.listProjects(),
         semEvoSQLService.projectHealthSummaries(),
-        platformContext.operator(),
       ]);
       projects.value = nextProjects;
-      operatorRole.value = operator.role;
       healthByProject.value = Object.fromEntries(summaries.map(item => [item.projectId, item]));
       healthFailureIds.value = new Set(
         summaries.filter(item => !item.available).map(item => item.projectId),
@@ -285,10 +296,7 @@
     }
   };
 
-  const summaryFromHealth = (
-    value: ProjectHealth,
-    previous?: ProjectHealthSummary,
-  ): ProjectHealthSummary => ({
+  const summaryFromHealth = (value: ProjectHealth): ProjectHealthSummary => ({
     projectId: value.projectId,
     available: true,
     queryReady: value.queryReady,
@@ -297,8 +305,6 @@
     totalQueries: value.quality.totalQueries,
     querySuccessRate: value.quality.querySuccessRate,
     correctionCount: value.quality.correctionCount,
-    accessRole: previous?.accessRole || 'VIEWER',
-    globalAdmin: previous?.globalAdmin || false,
   });
   const health = (projectId: number) => {
     const value = healthByProject.value[projectId];
@@ -312,7 +318,7 @@
       const nextHealth = await semEvoSQLService.projectHealth(projectId);
       healthByProject.value = {
         ...healthByProject.value,
-        [projectId]: summaryFromHealth(nextHealth, healthByProject.value[projectId]),
+        [projectId]: summaryFromHealth(nextHealth),
       };
       const nextFailures = new Set(healthFailureIds.value);
       nextFailures.delete(projectId);
@@ -322,14 +328,14 @@
     }
   };
   const projectActionLabel = (projectId: number) => {
-    const action = projectListAction(healthByProject.value[projectId], operatorRole.value);
-    if (action === 'CHAT') return '开始问数';
-    if (action === 'PREPARE') return '继续准备';
+    const action = projectListAction(healthByProject.value[projectId]);
+    if (action === 'CHAT') return '打开查询工作台';
+    if (action === 'PREPARE') return '继续建设模型';
     return health(projectId) ? '查看状态' : '查看项目';
   };
   const handleProjectAction = (projectId: number) => {
     const projectHealth = healthByProject.value[projectId];
-    const action = projectListAction(projectHealth, operatorRole.value);
+    const action = projectListAction(projectHealth);
     if (action === 'CHAT') {
       void startChat(projectId);
       return;
@@ -349,54 +355,109 @@
 
 <style scoped>
   .project-page {
-    max-width: 1400px;
-    margin: 0 auto;
-    padding: 32px;
+    position: relative;
   }
   .page-heading {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
     gap: 24px;
-    margin-bottom: 24px;
+    margin-bottom: 26px;
   }
-  .page-heading h1 {
-    margin: 4px 0 8px;
-    color: #0f172a;
-    font-size: 32px;
+  .page-heading > div {
+    max-width: 760px;
   }
-  .page-heading p {
-    margin: 0;
-    color: #64748b;
+  .page-heading .el-button {
+    margin-top: 8px;
   }
   .summary-grid {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 16px;
-    margin-bottom: 20px;
+    gap: 13px;
+    margin-bottom: 18px;
   }
-  .summary-grid :deep(.el-card__body) {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
+  .summary-card {
+    position: relative;
+    min-height: 135px;
+    overflow: hidden;
   }
-  .summary-grid strong {
-    color: #0f172a;
-    font-size: 28px;
+  .summary-card::after {
+    position: absolute;
+    right: -25px;
+    bottom: -38px;
+    width: 105px;
+    height: 105px;
+    border-radius: 50%;
+    background: currentColor;
+    content: '';
+    opacity: 0.04;
   }
-  .summary-grid .has-warning strong {
-    color: #b45309;
+  .summary-card :deep(.el-card__body) {
+    display: grid;
+    grid-template-columns: 34px 1fr;
+    grid-template-rows: auto auto auto;
+    column-gap: 10px;
+    padding: 17px 18px !important;
   }
-  .summary-grid span,
-  .subtle {
-    color: #94a3b8;
-    font-size: 13px;
+  .summary-icon {
+    display: grid;
+    width: 32px;
+    height: 32px;
+    grid-row: span 3;
+    place-items: center;
+    border-radius: 9px;
+    background: #edf3f3;
+    color: #4f7b7d;
+    font-size: 15px;
+  }
+  .summary-card strong {
+    align-self: end;
+    color: #172a36;
+    font-size: 27px;
+    line-height: 1.1;
+  }
+  .summary-card span {
+    color: #526770;
+    font-size: 12px;
+    font-weight: 650;
+  }
+  .summary-card small {
+    color: #91a1a6;
+    font-size: 10px;
+  }
+  .summary-card-success .summary-icon {
+    background: #e8f7f0;
+    color: #2b9274;
+  }
+  .summary-card-warning .summary-icon {
+    background: #fff3df;
+    color: #b97929;
+  }
+  .summary-card-danger .summary-icon {
+    background: #fff0ef;
+    color: #bd554f;
+  }
+  .summary-card-danger.has-warning strong {
+    color: #bd554f;
   }
   .project-table-card {
-    border-radius: 16px;
+    border-radius: 14px;
+  }
+  .project-table-card :deep(.el-card__body) {
+    padding: 8px 0 0;
+  }
+  .project-table-scroll {
+    overflow-x: auto;
+    outline: none;
+  }
+  .project-table-scroll:focus-visible {
+    box-shadow: 0 0 0 3px rgb(23 125 115 / 16%);
+  }
+  .project-table-scroll :deep(.el-table) {
+    min-width: 920px;
   }
   .list-error-alert {
-    margin-bottom: 16px;
+    margin: 12px 20px 16px;
   }
   .inline-recovery {
     display: flex;
@@ -408,14 +469,14 @@
     display: flex;
     justify-content: space-between;
     gap: 16px;
-    margin-bottom: 18px;
+    padding: 10px 20px 18px;
   }
   .toolbar-filters {
     display: flex;
     min-width: 0;
     flex: 1;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
   }
   .toolbar .el-input {
     max-width: 420px;
@@ -424,20 +485,29 @@
     padding: 0;
     border: 0;
     background: transparent;
-    color: #0f172a;
+    color: #1a3440;
     cursor: pointer;
     font: inherit;
-    font-weight: 650;
+    font-weight: 700;
+    text-align: left;
   }
   .project-link:hover {
-    color: #2563eb;
+    color: #177d73;
   }
   .next-action {
-    color: #334155;
-    font-size: 13px;
+    color: #3d5962;
+    font-size: 12px;
+    font-weight: 700;
   }
   .version-copy {
-    margin-top: 4px;
+    margin-top: 5px;
+  }
+  .project-updated {
+    margin-top: 3px;
+  }
+  .subtle {
+    color: #63777e;
+    font-size: 11px;
   }
   @media (max-width: 1100px) {
     .summary-grid {
@@ -445,11 +515,11 @@
     }
   }
   @media (max-width: 760px) {
-    .project-page {
-      padding: 20px 14px;
-    }
     .page-heading {
       flex-direction: column;
+    }
+    .page-heading .el-button {
+      margin-top: 0;
     }
     .summary-grid {
       grid-template-columns: 1fr;
@@ -468,6 +538,9 @@
     }
     .toolbar .el-input {
       max-width: none;
+    }
+    .project-table-scroll :deep(.el-table) {
+      min-width: 920px;
     }
   }
 </style>

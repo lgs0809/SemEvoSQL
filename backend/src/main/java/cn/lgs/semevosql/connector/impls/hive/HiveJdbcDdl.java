@@ -25,7 +25,6 @@ import cn.lgs.semevosql.connector.ddl.AbstractJdbcDdl;
 import cn.lgs.semevosql.enums.BizDataSourceTypeEnum;
 import java.util.ArrayList;
 import org.apache.commons.lang3.StringUtils;
-import org.springframework.stereotype.Service;
 
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -39,7 +38,6 @@ import static cn.lgs.semevosql.util.ColumnTypeUtil.wrapType;
 /**
  * Hive JDBC DDL 执行器实现
  */
-@Service
 public class HiveJdbcDdl extends AbstractJdbcDdl {
 
 @Override

@@ -30,24 +30,17 @@ import org.springframework.util.StringUtils;
 @Profile("prod")
 public class ProductionConfigurationGuard implements ApplicationRunner {
 
-	private final OperatorContextProperties operatorProperties;
-
 	private final CodeExecutorProperties codeExecutorProperties;
 
 	private final Environment environment;
 
-	public ProductionConfigurationGuard(OperatorContextProperties operatorProperties,
-			CodeExecutorProperties codeExecutorProperties, Environment environment) {
-		this.operatorProperties = operatorProperties;
+	public ProductionConfigurationGuard(CodeExecutorProperties codeExecutorProperties, Environment environment) {
 		this.codeExecutorProperties = codeExecutorProperties;
 		this.environment = environment;
 	}
 
 	@Override
 	public void run(ApplicationArguments args) {
-		if (operatorProperties.isDevelopmentMode()) {
-			throw invalid("semevosql.operator.development-mode must be false");
-		}
 		CodePoolExecutorEnum executor = codeExecutorProperties.getCodePoolExecutor();
 		String runtimeRole = environment.getProperty("semevosql.runtime-role", "application").trim();
 		if (executor == CodePoolExecutorEnum.LOCAL) {
@@ -59,6 +52,22 @@ public class ProductionConfigurationGuard implements ApplicationRunner {
 		if ("execution-worker".equals(runtimeRole) && executor != CodePoolExecutorEnum.DOCKER) {
 			throw invalid("the execution-worker process must use the Docker executor");
 		}
+		if (executor == CodePoolExecutorEnum.DOCKER) {
+			String imageName = requireText(codeExecutorProperties.getImageName(), "execution runner image");
+			if (!"semevosql/python-runner:1.0.0".equals(imageName)) {
+				throw invalid("execution runner image must be the release-pinned semevosql/python-runner:1.0.0 image");
+			}
+			if (!"none".equalsIgnoreCase(codeExecutorProperties.getNetworkMode())) {
+				throw invalid("execution containers must use network mode none");
+			}
+			if (!Boolean.TRUE.equals(codeExecutorProperties.getReadOnlyRootFilesystem())) {
+				throw invalid("execution containers must use a read-only root filesystem");
+			}
+			String runAsUser = requireText(codeExecutorProperties.getRunAsUser(), "execution container user");
+			if (runAsUser.startsWith("0:") || "0".equals(runAsUser)) {
+				throw invalid("execution containers must not run as root");
+			}
+		}
 		if (executor == CodePoolExecutorEnum.REMOTE) {
 			requireText(codeExecutorProperties.getRemoteUrl(), "remote code executor URL");
 		}
@@ -68,9 +77,6 @@ public class ProductionConfigurationGuard implements ApplicationRunner {
 			if (credential.length() < 32) {
 				throw invalid("execution broker internal credential must contain at least 32 characters");
 			}
-		}
-		if (!Boolean.parseBoolean(required("semevosql.security.enabled"))) {
-			throw invalid("semevosql.security.enabled must be true");
 		}
 		boolean projectMcpEnabled = Boolean.parseBoolean(environment.getProperty("semevosql.mcp.enabled", "false"));
 		boolean springMcpEnabled = Boolean.parseBoolean(environment.getProperty("spring.ai.mcp.server.enabled", "false"));
@@ -91,7 +97,6 @@ public class ProductionConfigurationGuard implements ApplicationRunner {
 				throw invalid("production Project MCP endpoint must remain /mcp");
 			}
 		}
-		required("spring.security.oauth2.resourceserver.jwt.issuer-uri");
 		required("semevosql.secrets.encryption-key");
 		if (!Boolean.parseBoolean(environment.getProperty("spring.flyway.enabled", "true"))) {
 			throw invalid("spring.flyway.enabled must be true");

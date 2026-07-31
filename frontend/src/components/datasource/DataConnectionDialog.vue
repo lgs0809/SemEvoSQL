@@ -22,7 +22,7 @@
     <el-form label-position="top" :model="form">
       <div class="form-grid">
         <el-form-item label="连接名称" required>
-          <el-input v-model="form.name" placeholder="例如：订单生产库" />
+          <el-input v-model="form.name" placeholder="输入连接名称" />
         </el-form-item>
         <el-form-item label="数据库类型" required>
           <el-select
@@ -39,20 +39,20 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="Host" required>
-          <el-input v-model="form.host" placeholder="db.internal.example.com" />
+        <el-form-item label="主机地址" required>
+          <el-input v-model="form.host" placeholder="输入数据库主机地址" />
         </el-form-item>
-        <el-form-item label="Port" required>
+        <el-form-item label="端口" required>
           <el-input-number v-model="form.port" :min="1" :max="65535" controls-position="right" />
         </el-form-item>
-        <el-form-item label="Database" required>
-          <el-input v-model="form.databaseName" placeholder="analytics" />
+        <el-form-item label="数据库名" required>
+          <el-input v-model="form.databaseName" placeholder="输入数据库名称" />
         </el-form-item>
-        <el-form-item label="Username">
+        <el-form-item label="用户名">
           <el-input v-model="form.username" autocomplete="off" />
         </el-form-item>
       </div>
-      <el-form-item :label="editing ? 'Password（留空保持原密码）' : 'Password'">
+      <el-form-item :label="editing ? '密码（留空保持原密码）' : '密码'">
         <el-input
           v-model="form.password"
           type="password"
@@ -108,11 +108,6 @@
     MYSQL: 3306,
     POSTGRESQL: 5432,
     POSTGRES: 5432,
-    ORACLE: 1521,
-    SQL_SERVER: 1433,
-    SQLSERVER: 1433,
-    HIVE: 10000,
-    DAMENG: 5236,
   };
 
   const initialize = async () => {
@@ -154,7 +149,7 @@
       !form.port ||
       !form.databaseName?.trim()
     ) {
-      ElMessage.warning('请填写连接名称、数据库类型、Host、Port 和 Database');
+      ElMessage.warning('请填写连接名称、数据库类型、主机地址、端口和数据库名');
       return false;
     }
     return true;

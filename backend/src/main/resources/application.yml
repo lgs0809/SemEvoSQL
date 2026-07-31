@@ -1,5 +1,6 @@
 server:
   port: 8065
+  address: ${SEMEVOSQL_SERVER_ADDRESS:127.0.0.1}
 
 management:
   endpoints:
@@ -26,6 +27,12 @@ springdoc:
 
 # Shared defaults are fail-closed. Local-only credentials and unsafe conveniences live in application-local.yml.
 semevosql:
+  # One semantic-planning operation shares this budget across its initial call and optional repair. The absolute
+  # interactive Run deadline is still authoritative and may only shorten it.
+  planner:
+    total-budget-ms: ${SEMEVOSQL_PLANNER_TOTAL_BUDGET_MS:120000}
+    max-model-calls: ${SEMEVOSQL_PLANNER_MAX_MODEL_CALLS:2}
+    minimum-repair-budget-ms: ${SEMEVOSQL_PLANNER_MINIMUM_REPAIR_BUDGET_MS:5000}
   instance-id: ${HOSTNAME:local}
   mcp:
     enabled: ${SEMEVOSQL_MCP_ENABLED:true}
@@ -35,24 +42,18 @@ semevosql:
       credential-ttl-days: ${SEMEVOSQL_MCP_CREDENTIAL_TTL_DAYS:90}
       retry-window-seconds: ${SEMEVOSQL_MCP_RETRY_WINDOW_SECONDS:300}
   runtime-role: ${SEMEVOSQL_RUNTIME_ROLE:application}
-  security:
-    enabled: ${SEMEVOSQL_SECURITY_ENABLED:false}
-    principal-claim: ${SEMEVOSQL_SECURITY_PRINCIPAL_CLAIM:sub}
-    role-claim: ${SEMEVOSQL_SECURITY_ROLE_CLAIM:roles}
-    authority-prefix: ROLE_SEMEVOSQL_
   secrets:
     encryption-key: ${SEMEVOSQL_SECRET_ENCRYPTION_KEY:}
     migrate-plaintext: ${SEMEVOSQL_MIGRATE_PLAINTEXT_SECRETS:true}
   operator:
-    development-mode: ${SEMEVOSQL_OPERATOR_DEVELOPMENT_MODE:false}
     default-operator: ${SEMEVOSQL_OPERATOR_DEFAULT_OPERATOR:local-operator}
-    default-role: ${SEMEVOSQL_OPERATOR_DEFAULT_ROLE:ADMIN}
   model-client:
     connection-max-retries: ${SEMEVOSQL_MODEL_CONNECTION_MAX_RETRIES:3}
     connection-initial-backoff: ${SEMEVOSQL_MODEL_CONNECTION_INITIAL_BACKOFF:250ms}
     connection-max-backoff: ${SEMEVOSQL_MODEL_CONNECTION_MAX_BACKOFF:2s}
     connection-retry-jitter: ${SEMEVOSQL_MODEL_CONNECTION_RETRY_JITTER:0.2}
     request-timeout: ${SEMEVOSQL_MODEL_REQUEST_TIMEOUT:60s}
+    validation-freshness: ${SEMEVOSQL_MODEL_VALIDATION_FRESHNESS:6h}
   llm-service-type: stream
   code-executor:
     code-pool-executor: ${SEMEVOSQL_CODE_EXECUTOR:docker}
@@ -61,7 +62,7 @@ semevosql:
     max-code-bytes: ${SEMEVOSQL_EXECUTION_MAX_CODE_BYTES:1048576}
     max-input-bytes: ${SEMEVOSQL_EXECUTION_MAX_INPUT_BYTES:5242880}
     max-requirement-bytes: ${SEMEVOSQL_EXECUTION_MAX_REQUIREMENT_BYTES:65536}
-    image-name: ${SEMEVOSQL_EXECUTION_IMAGE:continuumio/anaconda3:latest}
+    image-name: ${SEMEVOSQL_EXECUTION_IMAGE:semevosql/python-runner:1.0.0}
     network-mode: ${SEMEVOSQL_EXECUTION_NETWORK_MODE:none}
     limit-memory: ${SEMEVOSQL_EXECUTION_MEMORY_MB:500}
     cpu-core: ${SEMEVOSQL_EXECUTION_CPU_CORES:1}
@@ -136,7 +137,10 @@ semevosql:
       max-concurrent: 20
       queue-capacity: 100
       queue-timeout-ms: 5000
-      task-timeout-ms: 150000
+      # One absolute end-to-end deadline. Planner calls consume a shared sub-budget and every
+      # terminal write is attempt-fenced, so this value can cover the complete governed pipeline
+      # without granting independent timeouts to planner repair calls.
+      task-timeout-ms: ${SEMEVOSQL_INTERACTIVE_QUERY_DEADLINE_MS:300000}
     initialization:
       max-concurrent: 4
       queue-capacity: 20

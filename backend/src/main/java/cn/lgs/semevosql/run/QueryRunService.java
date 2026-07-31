@@ -45,6 +45,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
@@ -53,6 +54,8 @@ import reactor.core.publisher.Sinks;
 public class QueryRunService {
 
 	private static final Duration DEFAULT_LEASE = Duration.ofSeconds(30);
+
+	private static final long DEFAULT_INTERACTIVE_DEADLINE_MS = 300_000L;
 
 	private static final ReentrantLock[] EVENT_LOCKS = IntStream.range(0, 256)
 		.mapToObj(ignored -> new ReentrantLock())
@@ -64,18 +67,22 @@ public class QueryRunService {
 
 	private final SemEvoSQLMetrics metrics;
 
+	private final long interactiveDeadlineMs;
+
 	private final Map<String, Sinks.Many<RunEvent>> liveEvents = new ConcurrentHashMap<>();
 
 	@Autowired
 	public QueryRunService(QueryRunRepository repository, @Value("${semevosql.instance-id:local}") String instanceId,
-			SemEvoSQLMetrics metrics) {
+			SemEvoSQLMetrics metrics,
+			@Value("${semevosql.concurrency.interactive-query.task-timeout-ms:300000}") long interactiveDeadlineMs) {
 		this.repository = repository;
 		this.instanceId = instanceId;
 		this.metrics = metrics;
+		this.interactiveDeadlineMs = Math.max(1L, interactiveDeadlineMs);
 	}
 
 	public QueryRunService(QueryRunRepository repository, String instanceId) {
-		this(repository, instanceId, SemEvoSQLMetrics.noop());
+		this(repository, instanceId, SemEvoSQLMetrics.noop(), DEFAULT_INTERACTIVE_DEADLINE_MS);
 	}
 
 	@Transactional
@@ -109,6 +116,7 @@ public class QueryRunService {
 			.requestPayload(command.requestPayload())
 			.recoveryPayload(command.requestPayload())
 			.executionSnapshot(command.executionSnapshot())
+			.deadlineEpochMillis(resolveDeadline(command))
 			.build();
 		if (repository.insertIfAbsent(run) == 1) {
 			metrics.afterCommit(() -> metrics.runCreated(run.runType()));
@@ -118,6 +126,16 @@ public class QueryRunService {
 			.orElseThrow(() -> new IllegalStateException("Idempotent run insert lost the conflicting durable row"));
 		assertSameCommand(concurrent, command);
 		return concurrent;
+	}
+
+	private Long resolveDeadline(CreateRunCommand command) {
+		if (command.deadlineEpochMillis() != null) {
+			return command.deadlineEpochMillis();
+		}
+		if (command.runType() == RunType.INTERACTIVE_QUERY) {
+			return System.currentTimeMillis() + interactiveDeadlineMs;
+		}
+		return null;
 	}
 
 	private static void assertSameCommand(QueryRun existing, CreateRunCommand command) {
@@ -292,6 +310,17 @@ public class QueryRunService {
 	@Transactional
 	public RunEvent appendEvent(String runId, String eventType, String nodeName, String payload, String payloadSummary,
 			String idempotencyKey) {
+		return appendEvent(runId, null, eventType, nodeName, payload, payloadSummary, idempotencyKey);
+	}
+
+	/**
+	 * Appends an event for a specific attempt. The attempt-aware form locks and validates the
+	 * durable Run before allocating the event sequence, preventing a superseded Graph from
+	 * appending snapshots or traces into a recovered Run.
+	 */
+	@Transactional
+	public RunEvent appendEvent(String runId, String attemptId, String eventType, String nodeName, String payload,
+			String payloadSummary, String idempotencyKey) {
 		ReentrantLock eventLock = EVENT_LOCKS[Math.floorMod(runId.hashCode(), EVENT_LOCKS.length)];
 		eventLock.lock();
 		try {
@@ -304,12 +333,14 @@ public class QueryRunService {
 				return existing;
 			}
 			QueryRun locked = repository.lock(runId);
+			assertAttemptForEvent(locked, attemptId);
 			existing = repository.findEventByIdempotency(runId, idempotencyKey).orElse(null);
 			if (existing != null) {
 				assertSameEvent(existing, eventType, nodeName, payload, payloadSummary);
 				return existing;
 			}
 			QueryRunStateMachine.assertLateEventAllowed(locked, eventType);
+			assertRuntimeDeadlineAllowsEvent(locked, eventType);
 			long next = locked.lastEventSequence() + 1;
 			RunEvent event = RunEvent.builder()
 				.runId(runId)
@@ -338,6 +369,23 @@ public class QueryRunService {
 		}
 	}
 
+	private void assertAttemptForEvent(QueryRun run, String attemptId) {
+		if (attemptId == null || attemptId.isBlank()) {
+			return;
+		}
+		if (run.status() != RunStatus.RUNNING || !Objects.equals(run.attemptId(), attemptId)
+				|| (StringUtils.hasText(run.ownerInstance()) && !Objects.equals(run.ownerInstance(), instanceId))
+				|| (run.leaseExpireTime() != null
+						&& System.currentTimeMillis() >= run.leaseExpireTime().atZone(java.time.ZoneId.systemDefault()).toInstant()
+							.toEpochMilli())) {
+			throw new LateRunResultDroppedException("Late Run event dropped for run=" + run.runId() + ", attempt="
+					+ attemptId + "; currentStatus=" + run.status() + ", currentAttempt=" + run.attemptId());
+		}
+		if (run.deadlineEpochMillis() != null && System.currentTimeMillis() >= run.deadlineEpochMillis()) {
+			throw new RunDeadlineExceededException("Interactive Run deadline exhausted before event " + run.runId());
+		}
+	}
+
 	@Transactional
 	public QueryRun bindExecution(String runId, String episodeId, String attemptId, String threadId) {
 		QueryRun current = repository.lock(runId);
@@ -356,10 +404,23 @@ public class QueryRunService {
 	@Transactional
 	public QueryRun transition(String runId, RunStatus target, String currentNode, String errorCode,
 			String errorMessage) {
+		return transition(runId, null, target, currentNode, errorCode, errorMessage);
+	}
+
+	/**
+	 * Transitions a Run on behalf of a specific execution attempt. Graph callbacks must use
+	 * this overload so an old blocking attempt cannot complete a recovered attempt that has
+	 * already been bound to the same durable Run.
+	 */
+	@Transactional
+	public QueryRun transition(String runId, String attemptId, RunStatus target, String currentNode, String errorCode,
+			String errorMessage) {
 		QueryRun current = repository.lock(runId);
+		assertAttemptForTransition(current, attemptId);
 		if (current.status() == target) {
 			return current;
 		}
+		assertRuntimeDeadlineAllowsTransition(current, target);
 		QueryRunStateMachine.assertTransition(current.status(), target);
 		LocalDateTime finishTime = QueryRunStateMachine.terminal(target) ? LocalDateTime.now() : null;
 		if (repository.updateStatus(runId, current.revision(), target, currentNode, errorCode, errorMessage,
@@ -371,6 +432,38 @@ public class QueryRunService {
 			recordTerminalAfterCommit(updated);
 		}
 		return updated;
+	}
+
+	private static void assertAttemptForTransition(QueryRun current, String attemptId) {
+		if (attemptId == null || attemptId.isBlank()) {
+			return;
+		}
+		if (!Objects.equals(current.attemptId(), attemptId)) {
+			throw new LateRunResultDroppedException("Late Run transition dropped for run=" + current.runId()
+					+ "; currentAttempt=" + current.attemptId() + ", callbackAttempt=" + attemptId);
+		}
+	}
+
+	private static void assertRuntimeDeadlineAllowsEvent(QueryRun run, String eventType) {
+		if (run.runType() != RunType.INTERACTIVE_QUERY || run.status() != RunStatus.RUNNING
+				|| run.deadlineEpochMillis() == null || System.currentTimeMillis() < run.deadlineEpochMillis()) {
+			return;
+		}
+		if ("RUN_FAILED".equals(eventType) || "RUN_CANCELLED".equals(eventType) || "RUN_EXPIRED".equals(eventType)) {
+			return;
+		}
+		throw new RunDeadlineExceededException("Interactive Run deadline exhausted before event " + eventType);
+	}
+
+	private static void assertRuntimeDeadlineAllowsTransition(QueryRun run, RunStatus target) {
+		if (run.runType() != RunType.INTERACTIVE_QUERY || run.status() != RunStatus.RUNNING
+				|| run.deadlineEpochMillis() == null || System.currentTimeMillis() < run.deadlineEpochMillis()) {
+			return;
+		}
+		if (target == RunStatus.FAILED || target == RunStatus.CANCEL_REQUESTED || target == RunStatus.CANCELLED) {
+			return;
+		}
+		throw new RunDeadlineExceededException("Interactive Run deadline exhausted before transition to " + target);
 	}
 
 	@Transactional
@@ -573,6 +666,36 @@ public class QueryRunService {
 		return repository.recoverable(LocalDateTime.now(), 200);
 	}
 
+	/**
+	 * Fails an overdue interactive Run while holding its durable row lock. This closes the
+	 * recovery gap where a process dies after the Graph deadline signal but before its normal
+	 * error callback can persist RUN_FAILED.
+	 */
+	@Transactional
+	public QueryRun failIfDeadlineExceeded(String runId) {
+		QueryRun current = repository.lock(runId);
+		if (current.runType() != RunType.INTERACTIVE_QUERY || current.terminal()
+				|| current.deadlineEpochMillis() == null
+				|| System.currentTimeMillis() < current.deadlineEpochMillis()) {
+			return current;
+		}
+		if (current.status() == RunStatus.CANCEL_REQUESTED) {
+			return current;
+		}
+		RunStatus target = current.status() == RunStatus.WAITING_HUMAN ? RunStatus.EXPIRED : RunStatus.FAILED;
+		QueryRunStateMachine.assertTransition(current.status(), target);
+		if (repository.updateStatus(runId, current.revision(), target, current.currentNode(),
+				"RUN_DEADLINE_EXCEEDED", "Interactive Run exceeded its absolute execution deadline", LocalDateTime.now()) != 1) {
+			throw conflict(runId);
+		}
+		appendEvent(runId, target == RunStatus.EXPIRED ? "RUN_EXPIRED" : "RUN_FAILED", current.currentNode(), null,
+				"Interactive Run exceeded its absolute execution deadline",
+				"run-failed:deadline:" + runId + ":" + current.revision());
+		QueryRun failed = get(runId);
+		recordTerminalAfterCommit(failed);
+		return failed;
+	}
+
 	public String instanceId() {
 		return instanceId;
 	}
@@ -657,11 +780,18 @@ public class QueryRunService {
 	}
 
 	public record CreateRunCommand(RunType runType, Long projectId, Long projectVersionId, String threadId,
-			String requestId, String idempotencyKey, String requestPayload, String executionSnapshot) {
+			String requestId, String idempotencyKey, String requestPayload, String executionSnapshot,
+			Long deadlineEpochMillis) {
 
 		public CreateRunCommand(RunType runType, Long projectId, Long projectVersionId, String threadId,
 				String requestId, String idempotencyKey, String requestPayload) {
-			this(runType, projectId, projectVersionId, threadId, requestId, idempotencyKey, requestPayload, null);
+			this(runType, projectId, projectVersionId, threadId, requestId, idempotencyKey, requestPayload, null, null);
+		}
+
+		public CreateRunCommand(RunType runType, Long projectId, Long projectVersionId, String threadId,
+				String requestId, String idempotencyKey, String requestPayload, String executionSnapshot) {
+			this(runType, projectId, projectVersionId, threadId, requestId, idempotencyKey, requestPayload, executionSnapshot,
+				 null);
 		}
 	}
 

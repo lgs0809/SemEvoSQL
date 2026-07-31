@@ -25,13 +25,13 @@
 
     <div v-if="readiness" class="status-grid">
       <div class="status-card">
-        <span>问数状态</span>
-        <strong>{{ readiness.queryReady ? "可以问数" : "暂不可用" }}</strong>
+        <span>查询入口</span>
+        <strong>{{ readiness.queryReady ? "已就绪" : "暂不可用" }}</strong>
         <el-tag
           :type="readiness.queryReady ? 'success' : 'danger'"
           effect="plain"
         >
-          {{ readiness.queryReady ? "可问数" : "暂不可用" }}
+          {{ readiness.queryReady ? "查询入口已就绪" : "暂不可用" }}
         </el-tag>
       </div>
       <div class="status-card">
@@ -116,7 +116,7 @@
             :key="String(event.id)"
             :timestamp="formatTime(String(event.create_time || ''))"
           >
-            <strong>{{ event.event_type }}</strong>
+            <strong>{{ activationEventLabel(String(event.event_type || '')) }}</strong>
             <span class="timeline-copy">
               {{ event.from_version_id || "-" }} →
               {{ event.to_version_id || "-" }}
@@ -129,7 +129,9 @@
       <el-tab-pane label="资料修订" name="corpus">
         <el-table :data="corpus" empty-text="还没有资料修订记录">
           <el-table-column prop="revisionNo" label="修订号" width="100" />
-          <el-table-column prop="sourceType" label="来源" width="120" />
+          <el-table-column label="来源" width="120">
+            <template #default="{ row }">{{ materialSourceTypeLabel(row.sourceType) }}</template>
+          </el-table-column>
           <el-table-column
             prop="sourceRef"
             label="资料"
@@ -264,8 +266,12 @@
           empty-text="尚无回归结果"
         >
           <el-table-column prop="case_id" label="案例" min-width="150" />
-          <el-table-column prop="replay_level" label="级别" width="120" />
-          <el-table-column prop="status" label="状态" width="110" />
+          <el-table-column label="级别" width="120">
+            <template #default="{ row }">{{ replayLevelLabel(row.replay_level) }}</template>
+          </el-table-column>
+          <el-table-column label="状态" width="110">
+            <template #default="{ row }">{{ replayResultStatusLabel(row.status) }}</template>
+          </el-table-column>
           <el-table-column
             prop="error_message"
             label="错误"
@@ -467,6 +473,36 @@ const assetTypeLabel = (value?: string) =>
     MERGE_POLICY: "跨源合并策略",
     AUTHORITY_RULE: "跨源授权规则",
   })[value || ""] || "业务资产";
+const activationEventLabel = (value?: string) =>
+  ({
+    VERSION_PUBLISHED: "业务模型版本已发布",
+    VERSION_ACTIVATED: "业务模型版本已激活",
+    VERSION_ROLLED_BACK: "业务模型版本已回滚",
+    ROLLBACK: "业务模型版本已回滚",
+  })[value || ""] || "版本状态已更新";
+const materialSourceTypeLabel = (value?: string) =>
+  ({
+    MARKDOWN: "Markdown 文档",
+    YAML: "YAML 配置",
+    JSON: "JSON 配置",
+    DDL: "数据库结构",
+    HISTORICAL_SQL: "历史 SQL",
+  })[value || ""] || value || "资料";
+const replayLevelLabel = (value?: string) =>
+  ({
+    ASSET: "业务资产",
+    IR: "查询规划",
+    SQL: "SQL 生成",
+    EXECUTION: "执行结果",
+    GOLDEN_ASSET: "基准资产",
+    GOLDEN_IR: "基准查询规划",
+    GOLDEN_SQL: "基准 SQL",
+    GOLDEN_EXECUTION: "基准执行结果",
+  })[value || ""] || "回归阶段";
+const replayResultStatusLabel = (value?: string) =>
+  ({ PASSED: "通过", FAILED: "失败", REVIEW_REQUIRED: "需复核", RUNNING: "执行中" })[
+    value || ""
+  ] || value || "待确认";
 const formatTime = (value?: string) =>
   value ? new Date(value).toLocaleString("zh-CN") : "-";
 const changeSetTag = (status: string) => {

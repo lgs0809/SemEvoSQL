@@ -16,6 +16,7 @@
 package cn.lgs.semevosql.semantic.application;
 
 import cn.lgs.semevosql.learning.QueryCaseHints;
+import cn.lgs.semevosql.semantic.domain.ComputationIntent;
 import java.util.List;
 
 /** Explicit semantic-planner protocol. */
@@ -30,7 +31,15 @@ public sealed interface SemanticPlanningOutcome permits SemanticPlanningOutcome.
 		UNRESOLVABLE
 	}
 
-	record Resolved(QueryCaseHints binding) implements SemanticPlanningOutcome {
+	record Resolved(QueryCaseHints binding, ComputationIntent computationIntent) implements SemanticPlanningOutcome {
+		public Resolved(QueryCaseHints binding) {
+			this(binding, ComputationIntent.empty());
+		}
+
+		public Resolved {
+			computationIntent = computationIntent == null ? ComputationIntent.empty() : computationIntent;
+		}
+
 		@Override
 		public Status status() {
 			return Status.RESOLVED;

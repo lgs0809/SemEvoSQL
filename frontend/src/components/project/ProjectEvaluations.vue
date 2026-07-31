@@ -14,7 +14,7 @@
           <el-option
             v-for="version in versions"
             :key="version.id"
-            :label="`${version.versionNumber} · ${version.status}`"
+            :label="`${version.versionNumber} · ${versionStatusLabel(version.status)}`"
             :value="version.id"
           />
         </el-select>
@@ -62,7 +62,7 @@
           <el-table-column prop="case_name" label="名称" min-width="220" />
           <el-table-column prop="case_type" label="类型" width="150">
             <template #default="scope">
-              <el-tag>{{ scope.row.case_type }}</el-tag>
+              <el-tag>{{ caseTypeLabel(scope.row.case_type) }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column prop="question" label="问题" min-width="280" show-overflow-tooltip />
@@ -116,6 +116,7 @@
   import { computed, onMounted, ref, watch } from 'vue';
   import { ElMessage } from 'element-plus';
   import { semEvoSQLService, type SemanticProjectVersion } from '@/services/semevosql';
+  import { versionStatusLabel } from '@/services/displayLabels';
 
   const props = defineProps<{
     projectId: number;
@@ -210,6 +211,16 @@
     };
     return labels[status || ''] || status || '未知';
   };
+  const caseTypeLabel = (value?: string) =>
+    ({
+      POSITIVE: '正向查询',
+      NEGATIVE: '负向查询',
+      BOUNDARY: '边界场景',
+      SECURITY: '安全场景',
+      FRESHNESS: '时效场景',
+      MULTI_SOURCE: '多数据源',
+      PERFORMANCE: '性能场景',
+    })[String(value || '').toUpperCase()] || value || '未分类场景';
   const versionNumber = (versionId?: number) =>
     props.versions.find(item => item.id === versionId)?.versionNumber || '未知';
   const formatTime = (value?: string) => (value ? new Date(value).toLocaleString('zh-CN') : '-');

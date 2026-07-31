@@ -3,60 +3,96 @@
  * Licensed under the Apache License, Version 2.0.
  -->
 <template>
-  <div class="base-layout">
-    <header class="page-header">
-      <div class="header-content">
-        <button class="brand-logo" @click="router.push('/')">
-          <i class="bi bi-diagram-3"></i>
-          <span>SemEvoSQL</span>
+  <div class="base-layout" :class="{ 'focus-layout': focus }">
+    <aside class="app-sidebar">
+      <div class="sidebar-brand">
+        <button class="brand-logo" aria-label="返回项目工作台" @click="router.push('/projects')">
+          <span class="brand-mark"><i class="bi bi-diagram-3"></i></span>
+          <span class="brand-copy">
+            <strong>SemEvoSQL</strong>
+            <small>语义数据工作台</small>
+          </span>
         </button>
-        <div class="header-actions">
-          <nav class="header-nav" aria-label="主导航">
-            <button
-              v-for="item in visibleNavigation"
-              :key="item.path"
-              class="nav-item"
-              :class="{ active: isActive(item.modules) }"
-              @click="router.push(item.path)"
-            >
-              <i :class="item.icon"></i>
-              <span>{{ item.label }}</span>
-            </button>
-          </nav>
-          <el-dropdown v-if="operator" trigger="click">
-            <button class="account-button" title="当前账号与权限">
-              <span class="account-avatar">{{ operator.operator.slice(0, 1).toUpperCase() }}</span>
-              <span class="account-name">{{ operator.operator }}</span>
-              <i class="bi bi-chevron-down"></i>
-            </button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item disabled>
-                  {{ operator.role }} · {{ operator.source }}
-                </el-dropdown-item>
-                <el-dropdown-item v-if="canAdmin" @click="router.push('/admin/models')">
-                  模型
-                </el-dropdown-item>
-                <el-dropdown-item v-if="canAdmin" @click="router.push('/admin/settings')">
-                  系统服务
-                </el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-          <div v-else-if="operatorError" class="operator-error">{{ operatorError }}</div>
+      </div>
+
+      <div class="workspace-card">
+        <span class="workspace-kicker">本地工作区</span>
+        <strong>本地单机环境</strong>
+        <span><i class="bi bi-shield-check"></i> 自托管 · 单用户</span>
+      </div>
+
+      <nav class="side-nav" aria-label="主导航">
+        <span class="nav-section-label">工作区</span>
+        <button
+          v-for="item in visibleNavigation.slice(0, 2)"
+          :key="item.path"
+          class="nav-item"
+          :class="{ active: isActive(item.modules) }"
+          @click="router.push(item.path)"
+        >
+          <span class="nav-icon"><i :class="item.icon"></i></span>
+          <span class="nav-copy">
+            <strong>{{ item.label }}</strong>
+            <small>{{ item.description }}</small>
+          </span>
+          <i v-if="isActive(item.modules)" class="bi bi-arrow-right-short nav-arrow"></i>
+        </button>
+
+        <span class="nav-section-label platform-label">平台</span>
+        <button
+          v-for="item in visibleNavigation.slice(2)"
+          :key="item.path"
+          class="nav-item"
+          :class="{ active: isActive(item.modules) }"
+          @click="router.push(item.path)"
+        >
+          <span class="nav-icon"><i :class="item.icon"></i></span>
+          <span class="nav-copy">
+            <strong>{{ item.label }}</strong>
+            <small>{{ item.description }}</small>
+          </span>
+          <i v-if="isActive(item.modules)" class="bi bi-arrow-right-short nav-arrow"></i>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="service-status" :class="`is-${readinessTone}`">
+          <span class="status-dot"></span>
+          <span>
+            <strong>{{ readinessLabel }}</strong>
+            <small>{{ readinessHint }}</small>
+          </span>
         </div>
+        <button class="operator-chip" @click="router.push('/admin/models')">
+          <span class="operator-avatar">本地</span>
+          <span><strong>本地操作员</strong><small>打开模型设置</small></span>
+          <i class="bi bi-chevron-right"></i>
+        </button>
       </div>
-    </header>
-    <div v-if="degradedMessage" class="degraded-banner" role="status">
-      <div>
-        <strong>平台当前处于降级模式</strong>
-        <span>{{ degradedMessage }}</span>
+    </aside>
+
+    <div class="app-main">
+      <header v-if="!focus" class="topbar">
+        <div class="topbar-title">
+          <span class="topbar-eyebrow">语义数据工作台</span>
+          <strong>{{ currentTitle }}</strong>
+        </div>
+        <div class="topbar-actions">
+          <span class="topbar-context"><i class="bi bi-hdd-network"></i> 本地数据不会离开当前部署</span>
+          <span class="topbar-status" :class="`is-${readinessTone}`">
+            <span class="status-dot"></span>{{ readinessLabel }}
+          </span>
+        </div>
+      </header>
+      <div v-if="degradedMessage" class="degraded-banner" role="status">
+        <div>
+          <strong>模型服务需要处理</strong>
+          <span>{{ degradedMessage }}</span>
+        </div>
+        <el-button size="small" @click="router.push('/admin/models')">查看模型设置</el-button>
       </div>
-      <el-button v-if="canAdmin" size="small" @click="router.push('/admin/models')">
-        模型设置
-      </el-button>
+      <main class="page-content"><slot /></main>
     </div>
-    <main class="page-content"><slot /></main>
   </div>
 </template>
 
@@ -65,185 +101,399 @@
   import { useRoute, useRouter } from 'vue-router';
   import { platformContext } from '@/services/platformContext';
 
+  defineProps({
+    focus: { type: Boolean, default: false },
+  });
+
   const router = useRouter();
   const route = useRoute();
-  const operator = ref();
-  const operatorError = ref('');
   const readiness = ref();
   const readinessError = ref('');
-  const roleRank = { VIEWER: 0, EDITOR: 1, REVIEWER: 2, PUBLISHER: 3, ADMIN: 4 };
   const navigation = [
-    { label: '项目', path: '/projects', icon: 'bi bi-folder2-open', modules: ['project'] },
-    { label: '问数中心', path: '/chat', icon: 'bi bi-chat-square-text', modules: ['chat'] },
+    {
+      label: '项目工作台',
+      description: '项目、模型与治理',
+      path: '/projects',
+      icon: 'bi bi-grid-1x2',
+      modules: ['project'],
+    },
+    {
+      label: '查询工作台',
+      description: '用业务语言查数据',
+      path: '/chat',
+      icon: 'bi bi-chat-square-quote',
+      modules: ['chat'],
+    },
     {
       label: '数据连接',
+      description: '数据库与接入状态',
       path: '/connections',
       icon: 'bi bi-database',
       modules: ['connections'],
-      minimumRole: 'EDITOR',
     },
     {
-      label: '管理',
+      label: '模型服务',
+      description: '模型接口与可用性',
       path: '/admin/models',
-      icon: 'bi bi-gear',
+      icon: 'bi bi-cpu',
       modules: ['admin'],
-      minimumRole: 'ADMIN',
     },
   ];
 
-  const hasRole = minimumRole => {
-    if (!minimumRole) return true;
-    if (!operator.value) return false;
-    return (
-      (roleRank[operator.value.role] ?? -1) >= (roleRank[minimumRole] ?? Number.MAX_SAFE_INTEGER)
-    );
-  };
-  const visibleNavigation = computed(() => navigation.filter(item => hasRole(item.minimumRole)));
-  const canAdmin = computed(() => hasRole('ADMIN'));
+  const visibleNavigation = computed(() => navigation);
   const isActive = modules => modules.includes(route.meta.module);
+  const currentTitle = computed(() => String(route.meta.title || '工作区'));
+  const readinessTone = computed(() => {
+    if (readinessError.value) return 'unknown';
+    if (!readiness.value) return 'checking';
+    return readiness.value.ready ? 'ready' : 'attention';
+  });
+  const readinessLabel = computed(() => {
+    if (readinessError.value) return '状态未知';
+    if (!readiness.value) return '检查服务中';
+    return readiness.value.ready ? '模型服务正常' : '需要处理';
+  });
+  const readinessHint = computed(() => {
+    if (readinessError.value) return '点击打开模型设置';
+    if (!readiness.value) return '正在读取实时状态';
+    return readiness.value.ready ? '对话、向量、重排模型均可用' : '有模型暂不可用';
+  });
   const degradedMessage = computed(() => {
     if (readinessError.value)
       return '模型能力状态暂时无法读取；项目、历史结果和管理页面仍可继续访问。';
     if (!readiness.value || readiness.value.ready) return '';
     const missing = [];
-    if (!readiness.value.chatModelReady) missing.push('Chat Model');
-    if (!readiness.value.embeddingModelReady) missing.push('Embedding Model');
-    if (!readiness.value.rerankModelReady) missing.push('Rerank Model');
-    return `${missing.join('、')} 暂不可用；历史数据与控制面保持可访问，新问数和语义构建会被暂停。`;
+    if (!readiness.value.chatModelReady) missing.push('对话模型');
+    if (!readiness.value.embeddingModelReady) missing.push('向量模型');
+    if (!readiness.value.rerankModelReady) missing.push('重排模型');
+    return `${missing.join('、')} 暂不可用；历史数据与控制面保持可访问，新查询和语义构建会被暂停。`;
   });
 
   onMounted(async () => {
-    const [operatorResult, readinessResult] = await Promise.allSettled([
-      platformContext.operator(),
-      platformContext.readiness(true),
-    ]);
-    if (operatorResult.status === 'fulfilled') operator.value = operatorResult.value;
-    else
-      operatorError.value =
-        operatorResult.reason instanceof Error ? operatorResult.reason.message : '账号信息不可用';
-    if (readinessResult.status === 'fulfilled') readiness.value = readinessResult.value;
-    else
-      readinessError.value =
-        readinessResult.reason instanceof Error
-          ? readinessResult.reason.message
-          : '平台能力状态不可用';
+    try {
+      readiness.value = await platformContext.readiness(true);
+    } catch (cause) {
+      readinessError.value = cause instanceof Error ? cause.message : '平台能力状态不可用';
+    }
   });
 </script>
 
 <style scoped>
   .base-layout {
     min-height: 100vh;
-    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+    background: #f4f6f8;
   }
-  .page-header {
-    position: sticky;
-    top: 0;
+  .focus-layout .app-sidebar {
+    display: none;
+  }
+  .focus-layout .app-main {
+    margin-left: 0;
+  }
+  .focus-layout .page-content {
+    min-height: 100vh;
+  }
+  .app-sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
     z-index: 100;
-    border-bottom: 1px solid #e2e8f0;
-    background: rgba(255, 255, 255, 0.96);
-    box-shadow: 0 1px 3px rgb(15 23 42 / 8%);
-    backdrop-filter: blur(12px);
-  }
-  .header-content {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    max-width: 1600px;
-    height: 64px;
-    margin: 0 auto;
-    padding: 0 24px;
+    width: 248px;
+    flex-direction: column;
+    padding: 24px 16px 18px;
+    background: #102131;
+    color: #e7f1f3;
+    box-shadow: 12px 0 28px rgb(13 28 42 / 8%);
+  }
+  .sidebar-brand {
+    padding: 0 10px 24px;
+    border-bottom: 1px solid rgb(255 255 255 / 10%);
   }
   .brand-logo {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 11px;
     padding: 0;
     border: 0;
     background: transparent;
-    color: #0f172a;
+    color: #f5fbfb;
     cursor: pointer;
-    font-size: 20px;
+    text-align: left;
+  }
+  .brand-mark {
+    display: grid;
+    width: 38px;
+    height: 38px;
+    place-items: center;
+    border: 1px solid rgb(133 233 213 / 30%);
+    border-radius: 12px;
+    background: linear-gradient(145deg, #65d7bf, #2a9d9a);
+    color: #07242c;
+    box-shadow: 0 8px 18px rgb(34 184 159 / 20%);
+  }
+  .brand-mark i {
+    font-size: 19px;
+  }
+  .brand-copy {
+    display: grid;
+    gap: 2px;
+  }
+  .brand-copy strong {
+    font-size: 16px;
+    letter-spacing: -0.02em;
+  }
+  .brand-copy small {
+    color: #94b4bb;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+  }
+  .workspace-card {
+    display: grid;
+    gap: 5px;
+    margin: 18px 4px 24px;
+    padding: 13px 14px;
+    border: 1px solid rgb(165 225 218 / 14%);
+    border-radius: 12px;
+    background: rgb(255 255 255 / 5%);
+  }
+  .workspace-kicker,
+  .nav-section-label {
+    color: #6f9ca6;
+    font-size: 10px;
     font-weight: 700;
+    letter-spacing: 0.13em;
   }
-  .brand-logo i {
-    color: #2563eb;
-    font-size: 24px;
+  .workspace-card strong {
+    color: #eaf7f6;
+    font-size: 13px;
   }
-  .header-actions {
+  .workspace-card > span:last-child {
+    color: #8cb3b7;
+    font-size: 11px;
+  }
+  .workspace-card i {
+    margin-right: 4px;
+    color: #6cdec3;
+  }
+  .side-nav {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .platform-label {
+    margin-top: 24px;
+  }
+  .nav-item {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 10px;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    background: transparent;
+    color: #a1bdc1;
+    cursor: pointer;
+    text-align: left;
+    transition: 0.18s ease;
+  }
+  .nav-item:hover {
+    border-color: rgb(125 219 202 / 14%);
+    background: rgb(255 255 255 / 7%);
+    color: #e4f3f1;
+  }
+  .nav-item.active {
+    border-color: rgb(111 223 202 / 23%);
+    background: linear-gradient(90deg, rgb(72 196 169 / 21%), rgb(72 196 169 / 7%));
+    color: #edfffc;
+  }
+  .nav-icon {
+    display: grid;
+    width: 30px;
+    height: 30px;
+    flex: 0 0 auto;
+    place-items: center;
+    border-radius: 8px;
+    background: rgb(255 255 255 / 7%);
+    color: #77bfc0;
+    font-size: 15px;
+  }
+  .nav-item.active .nav-icon {
+    background: #62ceb5;
+    color: #09242c;
+  }
+  .nav-copy {
+    display: grid;
+    min-width: 0;
+    gap: 2px;
+  }
+  .nav-copy strong {
+    font-size: 12px;
+    font-weight: 650;
+  }
+  .nav-copy small {
+    overflow: hidden;
+    color: #7199a0;
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .nav-item.active .nav-copy small {
+    color: #9ed6d0;
+  }
+  .nav-arrow {
+    margin-left: auto;
+    color: #79d9c1;
+    font-size: 17px;
+  }
+  .sidebar-footer {
+    display: grid;
+    gap: 12px;
+    padding: 16px 4px 0;
+    border-top: 1px solid rgb(255 255 255 / 10%);
+  }
+  .service-status,
+  .operator-chip {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+  }
+  .service-status > span:last-child,
+  .operator-chip > span:nth-child(2) {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+  .service-status strong,
+  .operator-chip strong {
+    color: #cde5e5;
+    font-size: 11px;
+    font-weight: 650;
+  }
+  .service-status small,
+  .operator-chip small {
+    overflow: hidden;
+    color: #6f9ca6;
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .status-dot {
+    display: block;
+    width: 7px;
+    height: 7px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: #f3b75f;
+    box-shadow: 0 0 0 4px rgb(243 183 95 / 10%);
+  }
+  .is-ready .status-dot {
+    background: #66d8b8;
+    box-shadow: 0 0 0 4px rgb(102 216 184 / 10%);
+  }
+  .is-attention .status-dot {
+    background: #f3b75f;
+  }
+  .is-unknown .status-dot {
+    background: #bdcbd0;
+  }
+  .operator-chip {
+    width: 100%;
+    padding: 8px 6px;
+    border: 0;
+    border-radius: 9px;
+    background: rgb(255 255 255 / 5%);
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+  }
+  .operator-chip:hover {
+    background: rgb(255 255 255 / 9%);
+  }
+  .operator-avatar {
+    display: grid;
+    width: 29px;
+    height: 29px;
+    flex: 0 0 auto;
+    place-items: center;
+    border-radius: 9px;
+    background: #d8ede7;
+    color: #174f4d;
+    font-size: 10px;
+    font-weight: 750;
+  }
+  .operator-chip > i {
+    margin-left: auto;
+    color: #6f9ca6;
+    font-size: 13px;
+  }
+  .app-main {
+    min-height: 100vh;
+    margin-left: 248px;
+  }
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    display: flex;
+    min-height: 70px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 13px 34px;
+    border-bottom: 1px solid #e3e8ec;
+    background: rgb(250 252 252 / 93%);
+    backdrop-filter: blur(12px);
+  }
+  .topbar-title {
+    display: grid;
+    gap: 2px;
+  }
+  .topbar-eyebrow {
+    color: #8a9aa0;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.13em;
+  }
+  .topbar-title > strong {
+    color: #172a36;
+    font-size: 17px;
+    letter-spacing: -0.01em;
+  }
+  .topbar-actions {
     display: flex;
     align-items: center;
     gap: 14px;
   }
-  .header-nav {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .nav-item {
+  .topbar-context,
+  .topbar-status {
     display: flex;
     align-items: center;
     gap: 7px;
-    padding: 9px 14px;
-    border: 0;
-    border-radius: 9px;
-    background: transparent;
-    color: #64748b;
-    cursor: pointer;
-    font: inherit;
-    font-weight: 550;
-    transition: 0.18s ease;
+    color: #75878e;
+    font-size: 11px;
   }
-  .nav-item:hover {
-    background: #f1f5f9;
-    color: #334155;
+  .topbar-context i {
+    color: #2ca791;
+    font-size: 13px;
   }
-  .nav-item.active {
-    background: #eff6ff;
-    color: #1d4ed8;
-  }
-  .account-button {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 5px 8px;
-    border: 1px solid #e2e8f0;
-    border-radius: 10px;
-    background: #fff;
-    color: #334155;
-    cursor: pointer;
-  }
-  .account-avatar {
-    display: grid;
-    width: 28px;
-    height: 28px;
-    place-items: center;
-    border-radius: 50%;
-    background: #e0e7ff;
-    color: #3730a3;
-    font-size: 12px;
-    font-weight: 700;
-  }
-  .account-name {
-    max-width: 140px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 12px;
-  }
-  .operator-error {
-    max-width: 260px;
-    color: #dc2626;
-    font-size: 12px;
+  .topbar-status {
+    padding: 7px 10px;
+    border: 1px solid #dbeee8;
+    border-radius: 99px;
+    background: #f3fbf8;
+    color: #155b53;
+    font-weight: 650;
   }
   .degraded-banner {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 16px;
-    padding: 9px 24px;
-    border-bottom: 1px solid #fde68a;
-    background: #fffbeb;
-    color: #92400e;
+    padding: 10px 34px;
+    border-bottom: 1px solid #f2d99e;
+    background: #fff8e8;
+    color: #87591d;
     font-size: 12px;
   }
   .degraded-banner > div {
@@ -252,30 +502,67 @@
     gap: 10px;
   }
   .page-content {
-    min-height: calc(100vh - 64px);
+    min-height: calc(100vh - 70px);
   }
-  @media (max-width: 760px) {
-    .header-content {
-      height: auto;
-      padding: 12px;
-      align-items: flex-start;
-      flex-direction: column;
-      gap: 10px;
-    }
-    .header-actions {
+  @media (max-width: 900px) {
+    .app-sidebar {
+      position: sticky;
+      inset: auto;
       width: 100%;
-      align-items: stretch;
-      flex-direction: column;
+      min-height: 0;
+      padding: 12px 14px 10px;
+      box-shadow: 0 8px 20px rgb(13 28 42 / 8%);
     }
-    .header-nav {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      width: 100%;
+    .sidebar-brand {
+      padding: 0 2px 10px;
+      border-bottom: 0;
+    }
+    .workspace-card,
+    .sidebar-footer,
+    .nav-section-label {
+      display: none;
+    }
+    .side-nav {
+      display: flex;
+      flex-direction: row;
+      gap: 6px;
+      overflow-x: auto;
+      padding: 0 0 2px;
     }
     .nav-item {
-      justify-content: center;
-      padding: 8px 4px;
-      font-size: 12px;
+      width: auto;
+      flex: 0 0 auto;
+      padding: 7px 10px;
+    }
+    .nav-copy small,
+    .nav-arrow {
+      display: none;
+    }
+    .nav-copy strong {
+      font-size: 11px;
+    }
+    .nav-icon {
+      width: 24px;
+      height: 24px;
+      font-size: 13px;
+    }
+    .app-main {
+      margin-left: 0;
+    }
+    .topbar {
+      min-height: 58px;
+      padding: 10px 16px;
+    }
+    .topbar-context {
+      display: none;
+    }
+    .topbar-title > strong {
+      font-size: 15px;
+    }
+    .degraded-banner {
+      align-items: flex-start;
+      padding: 9px 16px;
+      flex-direction: column;
     }
   }
 </style>

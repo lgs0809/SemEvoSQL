@@ -23,7 +23,7 @@ public record QueryRun(String runId, RunType runType, Long projectId, Long proje
 		String attemptId, String threadId, RunStatus status, String currentNode, long lastEventSequence,
 		String requestId, String idempotencyKey, String ownerInstance, LocalDateTime leaseExpireTime,
 		LocalDateTime startTime, LocalDateTime finishTime, String errorCode, String errorMessage, long revision,
-		String requestPayload, String recoveryPayload, String executionSnapshot) {
+		String requestPayload, String recoveryPayload, String executionSnapshot, Long deadlineEpochMillis) {
 
 	public enum RunStatus {
 

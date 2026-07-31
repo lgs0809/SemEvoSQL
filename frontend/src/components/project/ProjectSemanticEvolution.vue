@@ -12,7 +12,7 @@
         </p>
       </div>
       <div class="filters">
-        <el-select v-model="status" @change="load">
+        <el-select v-model="status" placeholder="筛选建议状态" clearable @change="load">
           <el-option label="全部状态" value="" />
           <el-option
             v-for="item in statuses"
@@ -72,7 +72,7 @@
           <el-tag :type="statusType(scope.row.status)">{{ statusLabel(scope.row.status) }}</el-tag>
           <div v-if="scope.row.status === 'REPLAY_RUNNING'" class="subtle">
             {{ replayFor(scope.row.id)?.progress || 0 }}% ·
-            {{ replayFor(scope.row.id)?.currentLevel || '准备中' }}
+            {{ replayLevelLabel(replayFor(scope.row.id)?.currentLevel) }}
           </div>
         </template>
       </el-table-column>
@@ -161,13 +161,13 @@
         />
         <el-descriptions :column="2" border>
           <el-descriptions-item label="候选类型">
-            {{ selected.candidate_type }}
+            {{ candidateTypeLabel(selected.candidate_type) }}
           </el-descriptions-item>
           <el-descriptions-item label="状态">
             {{ statusLabel(selected.status) }}
           </el-descriptions-item>
           <el-descriptions-item label="资产">
-            {{ selected.asset_type }} / {{ selected.asset_key }}
+            {{ semanticAssetTypeLabel(selected.asset_type) }} / {{ selected.asset_key }}
           </el-descriptions-item>
           <el-descriptions-item label="审核人">
             {{ selected.reviewed_by || '-' }}
@@ -1021,6 +1021,19 @@
       RULE: '业务规则',
       GOLDEN_CASE: '验证案例',
     })[value || ''] || '业务资产';
+  const candidateTypeLabel = (value?: string) =>
+    ({
+      ALIAS: '叫法统一',
+      ENUM: '枚举含义',
+      ENUM_VALUE: '枚举含义',
+      METRIC: '指标定义',
+      DIMENSION: '维度定义',
+      RELATIONSHIP: '业务关系',
+      GRAIN: '统计粒度',
+      RULE: '业务规则',
+      DATASOURCE_AUTHORITY_INCORRECT: '数据来源职责',
+      MULTI_SOURCE_POLICY_INCORRECT: '多数据源策略',
+    })[value || ''] || '业务模型改进';
   const replayStatusLabel = (value?: string) =>
     ({
       QUEUED: '等待执行',

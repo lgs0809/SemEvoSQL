@@ -91,6 +91,12 @@ public class ValidatedQueryExampleService {
 		return recallService.recallHints(projectId, projectVersionId, catalogHash, question, contextHash, limit);
 	}
 
+	public QueryCaseHints recallHints(Long projectId, Long projectVersionId, String catalogHash, String question,
+			String contextHash, String principalId, int limit) {
+		return recallService.recallHints(projectId, projectVersionId, catalogHash, question, contextHash, principalId,
+				limit);
+	}
+
 	public QueryCaseHints recallHintsForEvaluation(Long projectId, Long projectVersionId, String catalogHash,
 			String question, String contextHash, int limit) {
 		return recallService.recallHintsForEvaluation(projectId, projectVersionId, catalogHash, question, contextHash,
@@ -99,6 +105,10 @@ public class ValidatedQueryExampleService {
 
 	public void recordHintUsage(String runId, QueryCaseHints hints) {
 		usageService.recordHintUsage(runId, hints);
+	}
+
+	public void recordHintUsage(String runId, String attemptId, QueryCaseHints hints) {
+		usageService.recordHintUsage(runId, attemptId, hints);
 	}
 
 	public void recordEpisodeOutcome(String episodeId, String outcome) {
@@ -112,6 +122,12 @@ public class ValidatedQueryExampleService {
 	public String renderApprovedExamples(Long projectId, Long projectVersionId, String catalogHash, String question,
 			int limit) {
 		return recallService.renderApprovedExamples(projectId, projectVersionId, catalogHash, question, limit);
+	}
+
+	public String renderApprovedExamples(Long projectId, Long projectVersionId, String catalogHash, String question,
+			String principalId, int limit) {
+		return recallService.renderApprovedExamples(projectId, projectVersionId, catalogHash, question, principalId,
+				limit);
 	}
 
 	public RebindReport rebindApprovedExamples(Long projectId, Long sourceVersionId, Long targetVersionId,

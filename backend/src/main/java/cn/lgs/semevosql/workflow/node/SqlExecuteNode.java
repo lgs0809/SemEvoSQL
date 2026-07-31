@@ -63,6 +63,10 @@ import cn.lgs.semevosql.review.QueryRepairPolicy;
 import cn.lgs.semevosql.review.QueryRepairPolicy.BudgetDecision;
 import cn.lgs.semevosql.review.QueryRepairPolicy.RepairBudget;
 import cn.lgs.semevosql.run.RunNodeEffectService;
+import cn.lgs.semevosql.run.RunDeadlineUtil;
+import cn.lgs.semevosql.run.RunExecutionFenceService;
+import cn.lgs.semevosql.run.LateRunResultDroppedException;
+import cn.lgs.semevosql.run.RunDeadlineExceededException;
 import cn.lgs.semevosql.semantic.domain.SemanticBlueprint;
 import cn.lgs.semevosql.semantic.domain.SemanticCatalogSnapshot;
 import cn.lgs.semevosql.sql.application.SensitiveResultSanitizer;
@@ -153,11 +157,16 @@ public class SqlExecuteNode implements NodeAction {
 
 	private final QueryRepairPolicy repairPolicy;
 
+	private final RunExecutionFenceService executionFence;
+
 	private static final int SAMPLE_DATA_NUMBER = 20;
 
 	@Override
 	@SuppressWarnings("unchecked") // Graph state stores generic Map/List values behind runtime Class tokens.
 	public Map<String, Object> apply(OverAllState state) throws Exception {
+		String executionRunId = StateUtil.getStringValue(state, RUN_ID, "");
+		String executionAttemptId = StateUtil.getStringValue(state, ATTEMPT_ID, "");
+		assertActiveIfBound(executionRunId, executionAttemptId);
 
 		Integer currentStep = PlanProcessUtil.getCurrentStepNumber(state);
 
@@ -183,7 +192,7 @@ public class SqlExecuteNode implements NodeAction {
 					.stream()
 					.map(SemanticBlueprint.ModelSelection::getPhysicalTable)
 					.collect(Collectors.toUnmodifiableSet());
-		String runId = state.value(RUN_ID, "");
+		String runId = executionRunId;
 		Map<String, String> existingResults = StateUtil.getObjectValue(state, SQL_EXECUTE_NODE_OUTPUT, Map.class,
 				new HashMap<>());
 		Map<String, String> existingQueries = StateUtil.getObjectValue(state, SQL_EXECUTED_QUERY_OUTPUT, Map.class,
@@ -256,6 +265,7 @@ public class SqlExecuteNode implements NodeAction {
 
 			SqlExecutionAdmissionControl.Permit permit = null;
 			try {
+				assertActiveIfBound(runId, attemptId);
 				permit = admissionControl.acquire(projectId, datasourceId, state.value(AGENT_ID, "anonymous"));
 				if (sqlQuery.length() > properties.getSqlExecution().getMaxSqlLength()) {
 					throw new SqlGuardViolationException("SQL text exceeds the configured maximum length: "
@@ -350,7 +360,8 @@ public class SqlExecuteNode implements NodeAction {
 				result.put(LAST_SQL_RESULT_PAYLOAD, strResultJson);
 				SqlExecutionEffect effect = new SqlExecutionEffect(sqlQuery, strResultJson, updatedResults,
 						updatedQueries, resultMemory.flattened(), resultMemory.byStep(), currentStep + 1);
-				runNodeEffectService.recordCompleted(runId, effectKey, effectInputHash, writeSqlEffect(effect));
+				assertActiveIfBound(runId, attemptId);
+				runNodeEffectService.recordCompleted(runId, attemptId, effectKey, effectInputHash, writeSqlEffect(effect));
 				resultSummary.put("decision", "PASS");
 				resultSummary.put("rowCount", resultData.size());
 				resultSummary.put("warnings", resultValidation.warnings());
@@ -365,7 +376,8 @@ public class SqlExecuteNode implements NodeAction {
 				}
 				recordSqlTrace(attemptId, effectKey + ":" + effectInputHash, sqlQuery, guardSummary, costSummary,
 						preflightSummary, resultSummary, "SUCCEEDED", retryCount, startNanos, null);
-				markPatternTemplateUsedBestEffort(StateUtil.getStringValue(state, SQL_PATTERN_TEMPLATE_ID, ""));
+				markPatternTemplateUsedBestEffort(StateUtil.getStringValue(state, SQL_PATTERN_TEMPLATE_ID, ""), runId,
+						attemptId);
 				permit.success();
 			}
 			catch (SqlGuardViolationException e) {
@@ -378,6 +390,11 @@ public class SqlExecuteNode implements NodeAction {
 						preflightSummary, resultSummary, "REJECTED", retryCount, startNanos, "GUARD_REJECTED");
 				result.put(SQL_REGENERATE_REASON, SqlRetryDto.empty());
 				emitter.error(new SqlValidationDecisionException(sqlValidationClassifier.classify(e, retryCount), e));
+			}
+			catch (LateRunResultDroppedException | RunDeadlineExceededException late) {
+				// The database/model work may not be interruptible, but no late result is allowed
+				// to enter the retry path or produce a durable side effect.
+				emitter.error(late);
 			}
 			catch (Exception e) {
 				SqlValidationResult validation = sqlValidationClassifier.classify(e, retryCount);
@@ -517,15 +534,21 @@ public class SqlExecuteNode implements NodeAction {
 		}
 	}
 
-	private void markPatternTemplateUsedBestEffort(String templateId) {
+	private void markPatternTemplateUsedBestEffort(String templateId, String runId, String attemptId) {
 		if (templateId == null || templateId.isBlank()) {
 			return;
 		}
 		try {
-			patternTemplateService.markUsed(templateId);
+			patternTemplateService.markUsed(templateId, runId, attemptId);
 		}
 		catch (RuntimeException usageError) {
 			log.warn("Unable to update Query Pattern Template usage for {}: {}", templateId, usageError.getMessage());
+		}
+	}
+
+	private void assertActiveIfBound(String runId, String attemptId) {
+		if (runId != null && !runId.isBlank() && attemptId != null && !attemptId.isBlank()) {
+			executionFence.assertActive(runId, attemptId);
 		}
 	}
 
@@ -540,6 +563,9 @@ public class SqlExecuteNode implements NodeAction {
 					new SqlTraceRequest(idempotencyKey, sql, Map.copyOf(guardSummary), Map.copyOf(costSummary),
 							Map.copyOf(preflightSummary), Map.of(), Map.copyOf(resultSummary), status, retryCount,
 							Math.max(0, (System.nanoTime() - startNanos) / 1_000_000), errorType));
+		}
+		catch (LateRunResultDroppedException | RunDeadlineExceededException late) {
+			throw late;
 		}
 		catch (RuntimeException traceError) {
 			log.warn("Unable to persist SQL trace for attempt {}: {}", attemptId, traceError.getMessage());
@@ -646,10 +672,15 @@ public class SqlExecuteNode implements NodeAction {
 			log.debug("Built chart config generation user prompt as follows \n {} \n", userPrompt);
 
 			// 调用LLM生成图表配置（使用系统提示词和用户提示词）
-			String chartConfigJson = llmService.toStringFlux(llmService.call(systemPrompt, userPrompt))
+			Duration runBudget = RunDeadlineUtil.remaining(state);
+			Duration enrichmentBudget = Duration.ofMillis(properties.getEnrichSqlResultTimeout());
+			if (runBudget != null && runBudget.compareTo(enrichmentBudget) < 0) {
+				enrichmentBudget = runBudget;
+			}
+			String chartConfigJson = llmService.toStringFlux(llmService.callWithin(systemPrompt, userPrompt, runBudget))
 				.collect(StringBuilder::new, StringBuilder::append)
 				.map(StringBuilder::toString)
-				.block(Duration.ofMillis(properties.getEnrichSqlResultTimeout()));
+				.block(enrichmentBudget);
 			if (chartConfigJson != null && !chartConfigJson.trim().isEmpty()) {
 				String content = MarkdownParserUtil.extractText(chartConfigJson.trim());
 				displayStyle = jsonParseUtil.tryConvertToObject(content, DisplayStyleBO.class);

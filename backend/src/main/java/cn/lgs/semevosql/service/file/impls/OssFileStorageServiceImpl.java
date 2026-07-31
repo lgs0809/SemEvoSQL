@@ -20,7 +20,6 @@ import cn.lgs.semevosql.properties.OssStorageProperties;
 import cn.lgs.semevosql.service.file.FileStorageService;
 import com.aliyun.oss.OSS;
 import com.aliyun.oss.OSSClientBuilder;
-import com.aliyun.oss.model.OSSObject;
 import com.aliyun.oss.model.ObjectMetadata;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -29,7 +28,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.core.io.InputStreamResource;
+import org.springframework.core.io.AbstractResource;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.http.MediaType;
@@ -176,8 +175,8 @@ public class OssFileStorageServiceImpl implements FileStorageService {
 	}
 
 	/**
-	 * This implementation throws IllegalStateException if attempting to read the
-	 * underlying stream multiple times.
+	 * Returns a repeatable Resource. Each read opens a fresh OSS object stream so callers may
+	 * safely inspect metadata and consume the content independently.
 	 */
 	@Override
 	public Resource getFileResource(String filePath) {
@@ -187,12 +186,21 @@ public class OssFileStorageServiceImpl implements FileStorageService {
 			return null;
 		}
 
-		OSSObject result = ossClient.getObject(ossProperties.getBucketName(), filePath);
-		// todo: 临时处理,只能读取一次,不能重复读
-		return new InputStreamResource(result.getObjectContent()) {
+		String bucketName = ossProperties.getBucketName();
+		return new AbstractResource() {
+			@Override
+			public String getDescription() {
+				return "OSS resource " + filePath;
+			}
+
+			@Override
+			public InputStream getInputStream() {
+				return ossClient.getObject(bucketName, filePath).getObjectContent();
+			}
+
 			@Override
 			public long contentLength() {
-				return result.getObjectMetadata().getContentLength();
+				return ossClient.getObjectMetadata(bucketName, filePath).getContentLength();
 			}
 		};
 	}

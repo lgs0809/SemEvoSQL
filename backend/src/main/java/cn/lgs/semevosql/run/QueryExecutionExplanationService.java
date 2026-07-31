@@ -24,6 +24,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -36,13 +37,13 @@ public class QueryExecutionExplanationService {
 
 	private final JdbcTemplate jdbc;
 
-	private final ExecutionSnapshotService snapshotService;
+	private final SemanticPlanSnapshotService semanticPlanSnapshots;
 
 	private final ObjectMapper mapper = JsonUtil.getObjectMapper();
 
-	public QueryExecutionExplanationService(JdbcTemplate jdbc, ExecutionSnapshotService snapshotService) {
+	public QueryExecutionExplanationService(JdbcTemplate jdbc, SemanticPlanSnapshotService semanticPlanSnapshots) {
 		this.jdbc = jdbc;
-		this.snapshotService = snapshotService;
+		this.semanticPlanSnapshots = semanticPlanSnapshots;
 	}
 
 	public QueryExecutionExplanation explain(QueryRun run) {
@@ -51,7 +52,7 @@ public class QueryExecutionExplanationService {
 		if (plan == null) {
 			return new QueryExecutionExplanation(message.question(), message.bindings(), List.of(), List.of(), Map.of(),
 					List.of(), List.of(), null, List.of(), List.of(), List.of(), sqlExecutions(run), reusedSteps(run),
-					execution(run));
+					execution(run), List.of());
 		}
 		List<Map<String, Object>> definitions = new ArrayList<>();
 		plan.getMetrics()
@@ -118,7 +119,82 @@ public class QueryExecutionExplanationService {
 				: message.bindings();
 		return new QueryExecutionExplanation(message.question(), semanticBindings, definitions, filters, time, groups,
 				ordering, limit, models, relationships, datasources, sqlExecutions(run), reusedSteps(run),
-				execution(run));
+				execution(run), resultColumns(run, plan));
+	}
+
+	/**
+	 * Result column labels are derived from the persisted result schema and the current governed plan. Physical column
+	 * names are implementation details and must not become the default user-facing vocabulary.
+	 */
+	private List<Map<String, Object>> resultColumns(QueryRun run, SemanticBlueprint plan) {
+		List<String> columns = jdbc.query("""
+				SELECT schema_json::text FROM qw_result_artifact
+				WHERE run_id = ? AND status = 'READY'
+				ORDER BY update_time DESC, artifact_id DESC LIMIT 1
+				""", (rs, rowNum) -> readColumns(rs.getString(1)), run.runId())
+			.stream()
+			.findFirst()
+			.orElse(List.of());
+		if (columns.isEmpty()) {
+			return List.of();
+		}
+		List<Map<String, Object>> labels = new ArrayList<>();
+		for (String column : columns) {
+			labels.add(Map.of("key", column, "label", labelForColumn(column, plan, labels.size())));
+		}
+		return List.copyOf(labels);
+	}
+
+	private String labelForColumn(String column, SemanticBlueprint plan, int position) {
+		String normalized = Objects.toString(column, "").trim().toLowerCase(Locale.ROOT);
+		for (SemanticBlueprint.MetricSelection metric : plan.getMetrics()) {
+			if (same(normalized, metric.getMetricCode()) || same(normalized, metric.getBusinessName())) {
+				return userFacingLabel(metric.getBusinessName(), "业务指标");
+			}
+		}
+		for (SemanticBlueprint.DimensionSelection dimension : plan.getDimensions()) {
+			if (same(normalized, dimension.getDimensionCode()) || same(normalized, dimension.getColumnName())
+					|| same(normalized, dimension.getBusinessName())) {
+				return userFacingLabel(dimension.getBusinessName(), "业务维度");
+			}
+		}
+		if (plan.getTimeRange() != null && (same(normalized, plan.getTimeRange().getTimeColumn())
+				|| normalized.contains("month") || normalized.contains("week") || normalized.contains("quarter")
+				|| normalized.contains("day"))) {
+			return "时间";
+		}
+		for (SemanticBlueprint.GroupSelection group : plan.getGroupBy()) {
+			if (same(normalized, group.getAlias()) || same(normalized, group.getColumnName())
+					|| same(normalized, group.getExpression())) {
+				return StringUtils.hasText(group.getTimeBucketGranularity()) ? "时间" : "分组维度";
+			}
+		}
+		if (normalized.contains("previous") || normalized.contains("prior") || normalized.contains("prev")) {
+			return "上期指标值";
+		}
+		if (normalized.contains("rate") || normalized.contains("growth") || normalized.contains("change")) {
+			return "环比变化率";
+		}
+		return "结果字段" + (position + 1);
+	}
+
+	private String userFacingLabel(String value, String fallback) {
+		return StringUtils.hasText(value) ? value.trim() : fallback;
+	}
+
+	private boolean same(String left, String right) {
+		return StringUtils.hasText(left) && StringUtils.hasText(right)
+				&& left.equals(right.trim().toLowerCase(Locale.ROOT));
+	}
+
+	private List<String> readColumns(String value) {
+		try {
+			return mapper.readValue(value == null ? "[]" : value, new TypeReference<List<String>>() {
+			});
+		}
+		catch (Exception ignored) {
+			return List.of();
+		}
 	}
 
 	private List<Map<String, Object>> semanticBindings(SemanticBlueprint plan) {
@@ -148,40 +224,7 @@ public class QueryExecutionExplanationService {
 	}
 
 	private SemanticBlueprint persistedSemanticPlan(QueryRun run) {
-		SemanticBlueprint snapshotPlan = snapshotService.readTyped(run.executionSnapshot())
-			.map(ExecutionSnapshot::semanticPlan)
-			.orElse(null);
-		if (snapshotPlan != null) {
-			return snapshotPlan;
-		}
-		List<String> eventPlans = jdbc.queryForList("""
-				SELECT payload FROM qw_run_event
-				WHERE run_id = ? AND event_type IN ('SEMANTIC_PLAN_SNAPSHOT', 'APPROVAL_PLAN_SNAPSHOT')
-				  AND payload IS NOT NULL
-				ORDER BY sequence DESC LIMIT 1
-				""", String.class, run.runId());
-		SemanticBlueprint eventPlan = readPlan(eventPlans.isEmpty() ? null : eventPlans.get(0));
-		if (eventPlan != null) {
-			return eventPlan;
-		}
-		List<String> todoPlans = jdbc.queryForList("""
-				SELECT semantic_plan_json::text FROM qw_query_task
-				WHERE run_id = ? AND semantic_plan_json IS NOT NULL
-				ORDER BY ordinal_no DESC LIMIT 1
-				""", String.class, run.runId());
-		return readPlan(todoPlans.isEmpty() ? null : todoPlans.get(0));
-	}
-
-	private SemanticBlueprint readPlan(String payload) {
-		if (!StringUtils.hasText(payload)) {
-			return null;
-		}
-		try {
-			return mapper.readValue(payload, SemanticBlueprint.class);
-		}
-		catch (Exception ignored) {
-			return null;
-		}
+		return semanticPlanSnapshots.latest(run.runId()).orElse(null);
 	}
 
 	private MessageEvidence messageEvidence(String runId) {

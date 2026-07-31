@@ -15,9 +15,8 @@
  */
 package cn.lgs.semevosql.multisource;
 
-import cn.lgs.semevosql.common.OperatorAuthorizationService;
+import cn.lgs.semevosql.common.LocalOperatorService;
 import cn.lgs.semevosql.common.OperatorContext;
-import cn.lgs.semevosql.common.OperatorRole;
 import cn.lgs.semevosql.multisource.MultiSourcePolicySnapshot.AuthorityRule;
 import cn.lgs.semevosql.multisource.MultiSourcePolicySnapshot.CrossSourceRelationship;
 import cn.lgs.semevosql.multisource.MultiSourcePolicySnapshot.FreshnessPolicy;
@@ -61,7 +60,7 @@ public class MultiSourcePolicyService {
 
 	private final SemanticCatalogRepository catalogRepository;
 
-	private final OperatorAuthorizationService authorization;
+	private final LocalOperatorService authorization;
 
 	public MultiSourcePolicySnapshot get(Long projectId, Long versionId) {
 		requireVersion(projectId, versionId);
@@ -76,7 +75,7 @@ public class MultiSourcePolicyService {
 	@Transactional
 	public MultiSourcePolicySnapshot replace(Long projectId, Long versionId, MultiSourcePolicySnapshot requested,
 			OperatorContext operator) {
-		authorization.requireAtLeast(operator, OperatorRole.EDITOR, "replace Multi-Source Policy");
+		authorization.require(operator, "replace Multi-Source Policy");
 		SemanticProjectVersion version = requireVersion(projectId, versionId);
 		if (version.getStatus() != ProjectVersionStatus.DRAFT) {
 			throw new IllegalStateException("Multi-source policy can only be changed in a DRAFT project version");

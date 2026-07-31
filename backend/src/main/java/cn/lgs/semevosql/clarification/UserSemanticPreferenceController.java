@@ -16,7 +16,6 @@
 package cn.lgs.semevosql.clarification;
 
 import cn.lgs.semevosql.common.OperatorContext;
-import cn.lgs.semevosql.common.OperatorRole;
 import java.security.Principal;
 import java.util.Objects;
 import lombok.RequiredArgsConstructor;
@@ -65,7 +64,7 @@ public class UserSemanticPreferenceController {
 	private void requirePreferenceOwner(Long preferenceId, OperatorContext operator) {
 		var preference = preferenceService.findById(preferenceId)
 			.orElseThrow(() -> new IllegalArgumentException("User semantic preference not found: " + preferenceId));
-		if (operator.role() != OperatorRole.ADMIN && !Objects.equals(preference.userId(), operator.operator())) {
+		if (!Objects.equals(preference.userId(), operator.operator())) {
 			throw new SecurityException("A personal semantic preference can only be changed by its owner");
 		}
 	}

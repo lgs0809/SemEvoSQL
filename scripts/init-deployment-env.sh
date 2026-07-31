@@ -40,11 +40,6 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     SEMEVOSQL_MCP_PUBLIC_BASE_URL=*)
       printf 'SEMEVOSQL_MCP_PUBLIC_BASE_URL=\n' >>"$tmp"
       ;;
-    SEMEVOSQL_OPERATOR_DEVELOPMENT_MODE=*)
-      # The generated environment targets the standalone/local-evaluation profile.
-      # ProductionConfigurationGuard requires this to be false when prod is enabled.
-      printf 'SEMEVOSQL_OPERATOR_DEVELOPMENT_MODE=true\n' >>"$tmp"
-      ;;
     SEMEVOSQL_METADATA_PORT=*)
       ;;
     *)
@@ -60,4 +55,4 @@ trap - EXIT
 chmod 600 "$TARGET" 2>/dev/null || true
 
 echo "Created $TARGET"
-echo "Review ports/security settings if needed, then run: ./scripts/start-semevosql.sh"
+echo "Review ports/exposure settings if needed, then run: ./scripts/start-semevosql.sh"

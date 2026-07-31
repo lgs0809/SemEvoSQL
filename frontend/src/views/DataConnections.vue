@@ -8,35 +8,36 @@
       <div class="page-heading">
         <div>
           <h1>数据连接</h1>
-          <p>统一管理 SemEvoSQL 可使用的数据库连接。密码不会在页面或查询接口中回显。</p>
+          <p>管理项目可使用的 MySQL / PostgreSQL 数据源，测试连接后再选择具体业务表。密码不会回显。</p>
         </div>
         <el-button type="primary" :icon="Plus" @click="openCreate">新建连接</el-button>
       </div>
 
       <el-card shadow="never" class="connection-card">
-        <el-table v-loading="loading" :data="connections" empty-text="还没有数据连接">
+        <div class="table-scroll" role="region" aria-label="数据连接列表" tabindex="0">
+          <el-table v-loading="loading" :data="connections" empty-text="还没有数据源连接">
           <el-table-column label="名称" min-width="180">
             <template #default="scope">
               <div class="connection-name">
-                <strong>{{ scope.row.name || `连接 ${scope.row.id}` }}</strong>
+                <strong>{{ connectionDisplayName(scope.row) }}</strong>
                 <span>
                   {{
-                    scope.row.description ||
-                    `${scope.row.host || '-'} / ${scope.row.databaseName || '-'}`
+                    connectionDescription(scope.row) ||
+                    '只读数据连接'
                   }}
                 </span>
+                <small class="connection-location">
+                  {{ connectionHostLabel(scope.row.host) }}{{ scope.row.port ? `:${scope.row.port}` : '' }}
+                  · {{ scope.row.databaseName || '未指定数据库' }}
+                </small>
               </div>
             </template>
           </el-table-column>
-          <el-table-column prop="type" label="类型" width="130" />
-          <el-table-column label="地址" min-width="190">
-            <template #default="scope">
-              {{ scope.row.host || '-' }}
-              <span v-if="scope.row.port">:{{ scope.row.port }}</span>
-            </template>
+          <el-table-column label="类型" width="110">
+            <template #default="scope">{{ datasourceTypeLabel(scope.row.type) }}</template>
           </el-table-column>
-          <el-table-column prop="databaseName" label="Database" min-width="150" />
-          <el-table-column label="最近连接测试" min-width="190">
+          <el-table-column prop="databaseName" label="数据库" min-width="145" show-overflow-tooltip />
+          <el-table-column label="最近测试" min-width="160">
             <template #default="scope">
               <el-tag :type="connectionStatusType(scope.row)" effect="plain">
                 {{ connectionStatusLabel(scope.row) }}
@@ -44,7 +45,7 @@
               <div class="subtle status-time">{{ formatTime(scope.row.lastTestTime) }}</div>
             </template>
           </el-table-column>
-          <el-table-column label="项目使用情况" min-width="240">
+          <el-table-column label="项目使用情况" min-width="165">
             <template #default="scope">
               <div v-if="usageFor(scope.row.id).length" class="usage-list">
                 <el-tag
@@ -63,12 +64,7 @@
               <span v-else class="subtle">尚未被数据项目使用</span>
             </template>
           </el-table-column>
-          <el-table-column label="配置更新时间" width="180">
-            <template #default="scope">
-              {{ formatConfigTime(scope.row.updateTime || scope.row.createTime) }}
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="230" fixed="right">
+          <el-table-column label="操作" width="175">
             <template #default="scope">
               <el-button
                 link
@@ -82,10 +78,11 @@
               <el-button link type="danger" @click="remove(scope.row)">删除</el-button>
             </template>
           </el-table-column>
-        </el-table>
+          </el-table>
+        </div>
 
         <el-empty v-if="!loading && connections.length === 0" description="从第一个数据库连接开始">
-          <el-button type="primary" @click="openCreate">新建数据连接</el-button>
+          <el-button type="primary" @click="openCreate">新建数据源连接</el-button>
         </el-empty>
       </el-card>
     </section>
@@ -102,6 +99,12 @@
   import DataConnectionDialog from '@/components/datasource/DataConnectionDialog.vue';
   import datasourceService, { type Datasource, type DatasourceUsage } from '@/services/datasource';
   import { getApiErrorMessage } from '@/services/common';
+  import {
+    datasourceDescriptionLabel,
+    datasourceDisplayName,
+    datasourceHostLabel,
+    datasourceTypeLabel,
+  } from '@/services/displayLabels';
 
   const connections = ref<Datasource[]>([]);
   const usages = ref<DatasourceUsage[]>([]);
@@ -172,6 +175,10 @@
     }
   };
 
+  const connectionDisplayName = datasourceDisplayName;
+  const connectionDescription = datasourceDescriptionLabel;
+  const connectionHostLabel = datasourceHostLabel;
+
   const connectionStatusLabel = (datasource: Datasource) => {
     if (datasource.status && datasource.status !== 'active') return '配置已停用';
     if (datasource.testStatus === 'success') return '上次测试通过';
@@ -189,9 +196,6 @@
     datasourceId ? usages.value.filter(item => item.datasourceId === datasourceId) : [];
   const formatTime = (value?: string) =>
     value ? new Date(value.replace(' ', 'T')).toLocaleString('zh-CN') : '尚无测试记录';
-  const formatConfigTime = (value?: string) =>
-    value ? new Date(value.replace(' ', 'T')).toLocaleString('zh-CN') : '未记录';
-
   onMounted(load);
 </script>
 
@@ -220,6 +224,17 @@
     margin-top: 22px;
     border-radius: 16px;
   }
+  .table-scroll {
+    overflow-x: auto;
+    border-radius: 12px;
+    outline: none;
+  }
+  .table-scroll:focus-visible {
+    box-shadow: 0 0 0 3px rgb(23 125 115 / 16%);
+  }
+  .connection-card :deep(.el-table) {
+    min-width: 920px;
+  }
   .connection-name {
     display: grid;
     gap: 4px;
@@ -229,6 +244,13 @@
     color: #64748b;
     font-size: 12px;
   }
+  .connection-location {
+    overflow: hidden;
+    color: #7a8c92;
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .status-time {
     margin-top: 5px;
   }
@@ -236,6 +258,12 @@
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
+  }
+  .usage-list :deep(.el-tag) {
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   @media (max-width: 760px) {
     .page-shell {

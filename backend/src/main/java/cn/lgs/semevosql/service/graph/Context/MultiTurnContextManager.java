@@ -127,13 +127,7 @@ public class MultiTurnContextManager {
 		ConversationTurnSummarizer.CompletionContext completion = turnSummarizer.summarize(pending.runId,
 				pending.userQuestion, plan);
 		repository.complete(pending.runId, plan, completion);
-		try {
-			compactionService.maybeCompact(threadId);
-		}
-		catch (Exception ex) {
-			log.warn("Conversation compaction failed after completing turn for thread {}: {}", threadId,
-					ex.getMessage());
-		}
+		compactionService.maybeCompactAsync(threadId);
 	}
 
 	/** Reset an unfinished plan before replaying a failed run from the graph entry. */

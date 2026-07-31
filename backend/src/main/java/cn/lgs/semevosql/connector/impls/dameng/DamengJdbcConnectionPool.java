@@ -18,11 +18,9 @@ package cn.lgs.semevosql.connector.impls.dameng;
 import cn.lgs.semevosql.connector.pool.AbstractDBConnectionPool;
 import cn.lgs.semevosql.enums.BizDataSourceTypeEnum;
 import cn.lgs.semevosql.enums.ErrorCodeEnum;
-import org.springframework.stereotype.Service;
 
 import static cn.lgs.semevosql.enums.ErrorCodeEnum.OTHERS;
 
-@Service("damengJdbcConnectionPool")
 public class DamengJdbcConnectionPool extends AbstractDBConnectionPool {
 
 	private static final String DRIVER = "dm.jdbc.driver.DmDriver";

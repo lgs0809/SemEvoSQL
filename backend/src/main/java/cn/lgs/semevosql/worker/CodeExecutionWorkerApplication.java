@@ -190,6 +190,9 @@ public final class CodeExecutionWorkerApplication implements AutoCloseable {
 		if (size(request.requirement()) > properties.getMaxRequirementBytes()) {
 			return "Requirements payload exceeds the configured limit";
 		}
+		if (StringUtils.hasText(request.requirement())) {
+			return "Runtime package installation is disabled; use the pinned SemEvoSQL runner dependencies";
+		}
 		return null;
 	}
 
@@ -224,6 +227,23 @@ public final class CodeExecutionWorkerApplication implements AutoCloseable {
 		if (properties.getMaxCodeBytes() <= 0 || properties.getMaxInputBytes() <= 0
 				|| properties.getMaxRequirementBytes() <= 0) {
 			throw new IllegalStateException("Execution worker payload limits must be positive");
+		}
+		if (!"semevosql/python-runner:1.0.0".equals(properties.getImageName())) {
+			throw new IllegalStateException("Execution worker must use semevosql/python-runner:1.0.0");
+		}
+		if (!"none".equalsIgnoreCase(properties.getNetworkMode())) {
+			throw new IllegalStateException("Execution worker containers must use network mode none");
+		}
+		if (!Boolean.TRUE.equals(properties.getReadOnlyRootFilesystem())) {
+			throw new IllegalStateException("Execution worker containers must use a read-only root filesystem");
+		}
+		if (!StringUtils.hasText(properties.getRunAsUser()) || properties.getRunAsUser().startsWith("0:")
+				|| "0".equals(properties.getRunAsUser())) {
+			throw new IllegalStateException("Execution worker containers must not run as root");
+		}
+		if (properties.getPidsLimit() == null || properties.getPidsLimit() <= 0 || properties.getLimitMemory() == null
+				|| properties.getLimitMemory() <= 0 || properties.getCpuCore() == null || properties.getCpuCore() <= 0) {
+			throw new IllegalStateException("Execution worker resource limits must be positive");
 		}
 	}
 

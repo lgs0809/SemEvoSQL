@@ -81,8 +81,8 @@ public class SemanticGovernanceApplicationService {
         ChangeSet changeSet = changeSetService.get(changeSetId);
         List<ChangeItem> items = changeSetService.items(changeSetId);
         List<Map<String, Object>> replayResults = jdbc.queryForList("""
-                SELECT replay_execution_id, case_id, replay_level, status, expected_json, actual_json, error_message,
-                       create_time
+                SELECT replay_execution_id, case_id, replay_level, replay_mode, dataset_version, status,
+                       baseline_json, candidate_json, proof_json, error_message, create_time
                 FROM qw_semantic_replay_result
                 WHERE change_set_id = ?
                 ORDER BY create_time, case_id, replay_level

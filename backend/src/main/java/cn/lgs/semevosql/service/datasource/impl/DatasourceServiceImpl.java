@@ -35,6 +35,7 @@ import cn.lgs.semevosql.mapper.DatasourceMapper;
 import cn.lgs.semevosql.mapper.LogicalRelationMapper;
 import cn.lgs.semevosql.common.SecretCipher;
 import cn.lgs.semevosql.service.datasource.DatasourceService;
+import cn.lgs.semevosql.service.datasource.SemanticQueryDatasourceCapabilities;
 import cn.lgs.semevosql.service.datasource.handler.DatasourceTypeHandler;
 import cn.lgs.semevosql.service.datasource.handler.registry.DatasourceTypeHandlerRegistry;
 import java.util.ArrayList;
@@ -51,7 +52,6 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-// todo: 检查Mapper的返回值，判断是否执行成功（或者对Mapper进行AOP）
 @Slf4j
 @Service
 @AllArgsConstructor
@@ -99,6 +99,7 @@ public class DatasourceServiceImpl implements DatasourceService {
 	@Override
 	public Datasource createDatasource(Datasource datasource) {
 		Datasource persisted = copyDatasource(datasource);
+		SemanticQueryDatasourceCapabilities.requireSupported(persisted.getType());
 		DatasourceTypeHandler handler = datasourceTypeHandlerRegistry.getRequired(persisted.getType());
 		String connectionUrl = handler.resolveConnectionUrl(persisted);
 		if (StringUtils.isNotBlank(connectionUrl)) {
@@ -115,8 +116,8 @@ public class DatasourceServiceImpl implements DatasourceService {
 		}
 		persisted
 			.setPassword(secretCipher.encryptPlaintext(persisted.getPassword() == null ? "" : persisted.getPassword()));
-		if (datasourceMapper.insert(persisted) == 0) {
-			throw new RuntimeException("Datasource insert failed");
+		if (datasourceMapper.insert(persisted) != 1) {
+			throw new IllegalStateException("Datasource insert did not persist exactly one row");
 		}
 		return toPublicDatasource(persisted);
 	}
@@ -128,13 +129,14 @@ public class DatasourceServiceImpl implements DatasourceService {
 			throw new DatasourceNotFoundException(id);
 		}
 		mergeUpdate(persisted, datasource);
+		SemanticQueryDatasourceCapabilities.requireSupported(persisted.getType());
 		DatasourceTypeHandler handler = datasourceTypeHandlerRegistry.getRequired(persisted.getType());
 		String connectionUrl = handler.resolveConnectionUrl(decryptDatasource(persisted));
 		if (StringUtils.isNotBlank(connectionUrl)) {
 			persisted.setConnectionUrl(connectionUrl);
 		}
-		if (datasourceMapper.updateById(persisted) == 0) {
-			throw new RuntimeException("Datasource update failed");
+		if (datasourceMapper.updateById(persisted) != 1) {
+			throw new IllegalStateException("Datasource update did not persist exactly one row");
 		}
 		persisted.setTestStatus("unknown");
 		persisted.setLastTestTime(null);

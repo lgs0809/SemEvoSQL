@@ -32,6 +32,7 @@ import cn.lgs.semevosql.util.ChatResponseUtil;
 import cn.lgs.semevosql.util.FluxUtil;
 import cn.lgs.semevosql.util.JsonUtil;
 import cn.lgs.semevosql.util.StateUtil;
+import cn.lgs.semevosql.run.RunDeadlineUtil;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatResponse;
@@ -89,11 +90,12 @@ public class PlannerNode implements NodeAction {
 			return;
 		}
 		String activeTodoId = StateUtil.getStringValue(state, ACTIVE_TODO_ID, "");
+		String attemptId = StateUtil.getStringValue(state, ATTEMPT_ID, "");
 		String scope = StringUtils.hasText(activeTodoId) ? activeTodoId : "simple";
 		SemanticBlueprint semanticPlan = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticBlueprint.class,
 				(SemanticBlueprint) null);
 		String semanticHash = semanticPlan == null ? "none" : canonicalJson.hash(semanticPlan);
-		queryRunService.appendEvent(runId, "PLANNER_PLAN_SNAPSHOT", "planner", plannerOutput,
+	queryRunService.appendEvent(runId, attemptId, "PLANNER_PLAN_SNAPSHOT", "planner", plannerOutput,
 				"Exact execution Planner output persisted for diagnosis and durable recovery",
 				"planner-plan-snapshot:" + runId + ":" + scope + ":sem-" + semanticHash + ":"
 						+ Integer.toHexString(plannerOutput.hashCode()));
@@ -143,7 +145,15 @@ public class PlannerNode implements NodeAction {
 		log.debug("Planner prompt: as follows \n{}\n", plannerPrompt);
 
 		// 调用LLM生成计划
-		return llmService.callUser(plannerPrompt);
+		return llmService.callUserWithin(plannerPrompt, RunDeadlineUtil.remaining(state))
+			.filter(response -> StringUtils.hasText(ChatResponseUtil.getText(response)))
+			.switchIfEmpty(Flux.defer(() -> {
+				// A provider can complete a streaming request without an assistant payload. Keep the governed semantic plan
+				// and use the smallest valid SQL-first execution plan; SQL generation still performs the open-ended lowering,
+				// preflight, guard, cost and result-review checks before anything executes.
+				log.warn("Planner returned no content; using the generic SQL-first execution plan");
+				return Flux.just(ChatResponseUtil.createPureResponse(Plan.nl2SqlPlan()));
+			}));
 	}
 
 	private Flux<ChatResponse> handleSqlGenerationOnly() {

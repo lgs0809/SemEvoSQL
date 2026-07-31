@@ -31,16 +31,24 @@ cd SemEvoSQL
 
 Open **http://127.0.0.1:23000/semevosql/**, then:
 
-1. configure model providers in the Web Console;
-2. connect a read-only business database;
+1. configure Chat, Embedding, and optional Rerank providers in the Web Console;
+2. connect a read-only MySQL or PostgreSQL business database;
 3. create a project and publish its semantic model;
 4. ask questions in natural language.
+
+SemEvoSQL 1.0 runs as a self-hosted single-user application and does not ship a built-in account or login system. Backend and frontend ports bind to `127.0.0.1` by default. Connect the business databases owned by your deployment from the Web Console; no project or business dataset is provisioned by the application. The startup script refuses non-loopback exposure unless `SEMEVOSQL_ALLOW_REMOTE_BIND=true` is explicitly set after a trusted external access layer has been put in place.
+
+## Deployment and execution boundary
+
+The application process never owns Docker daemon access. Generated Python runs through the separate execution worker and the versioned `semevosql/python-runner:1.0.0` image with no network, a read-only root filesystem, dropped Linux capabilities, process/memory/CPU limits, and a non-root runtime user. Runtime package installation is disabled. The worker still controls the Docker socket and must therefore be treated as a trusted internal control-plane component; do not expose its internal HTTP endpoint. The startup script detects the Docker socket group automatically, while `SEMEVOSQL_DOCKER_GID` remains available as an explicit override for unusual hosts.
+
+SemEvoSQL 1.0 should not be exposed directly to the Internet. If remote access is required, keep the application behind a trusted reverse proxy, VPN, or ingress that provides the deployment's access control, HTTPS, firewall, hostname, and certificate policy before opting into non-loopback binding.
 
 ## Highlights
 
 - **Semantic-first NL2SQL** — business metrics, dimensions, relationships, time semantics, aliases, rules, and evidence live in a versioned Semantic Catalog.
 - **Verified SQL** — the model produces a Semantic Blueprint; SemEvoSQL compiles it, applies SQL policy checks, runs preflight validation, and only then executes against a read-only data source.
-- **Hybrid retrieval** — Exact, BM25, and Vector retrieval are fused with RRF and refined by Rerank before planning.
+- **Hybrid retrieval** — Exact, BM25, and Vector retrieval are fused with RRF; when configured and available, Rerank refines the governed candidate set before planning.
 - **Durable execution** — query runs, checkpoints, clarification, evidence, review, and recovery survive browser or network interruptions.
 - **Continuous learning** — validated corrections and successful query cases can be replayed and published into later semantic versions.
 - **Agent-ready** — published projects can expose governed query capabilities through Streamable HTTP MCP.
@@ -51,7 +59,7 @@ Open **http://127.0.0.1:23000/semevosql/**, then:
 Natural-language question
           │
           ▼
- Exact + BM25 + Vector → RRF → Rerank
+ Exact + BM25 + Vector → RRF → optional Rerank
           │
           ▼
   Semantic Blueprint

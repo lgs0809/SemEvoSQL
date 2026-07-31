@@ -24,6 +24,7 @@ services:
       dockerfile: deploy/Dockerfile-backend
     image: ${SEMEVOSQL_BACKEND_IMAGE:-semevosql/backend:local}
     environment:
+      SEMEVOSQL_SERVER_ADDRESS: 0.0.0.0
       SPRING_PROFILES_ACTIVE: ${SEMEVOSQL_SPRING_PROFILE:-standalone}
       SEMEVOSQL_DATASOURCE_URL: jdbc:postgresql://metadata-db:5432/${SEMEVOSQL_METADATA_DATABASE:-semevosql}?stringtype=unspecified
       SEMEVOSQL_DATASOURCE_USERNAME: ${SEMEVOSQL_METADATA_USER:-semevosql}
@@ -32,9 +33,6 @@ services:
       SEMEVOSQL_CODE_EXECUTOR: remote
       SEMEVOSQL_EXECUTION_REMOTE_URL: http://execution-worker:8066
       SEMEVOSQL_EXECUTION_INTERNAL_TOKEN: ${SEMEVOSQL_EXECUTION_INTERNAL_TOKEN:?set SEMEVOSQL_EXECUTION_INTERNAL_TOKEN}
-      SEMEVOSQL_OPERATOR_DEVELOPMENT_MODE: ${SEMEVOSQL_OPERATOR_DEVELOPMENT_MODE:-false}
-      SEMEVOSQL_SECURITY_ENABLED: ${SEMEVOSQL_SECURITY_ENABLED:-false}
-      SEMEVOSQL_JWT_ISSUER_URI: ${SEMEVOSQL_JWT_ISSUER_URI:-}
       SEMEVOSQL_SECRET_ENCRYPTION_KEY: ${SEMEVOSQL_SECRET_ENCRYPTION_KEY:?set SEMEVOSQL_SECRET_ENCRYPTION_KEY}
       SEMEVOSQL_RETENTION_ENABLED: ${SEMEVOSQL_RETENTION_ENABLED:-true}
       SEMEVOSQL_RETENTION_DRY_RUN: ${SEMEVOSQL_RETENTION_DRY_RUN:-true}
@@ -51,7 +49,7 @@ services:
       SEMEVOSQL_MCP_PUBLIC_BASE_URL: ${SEMEVOSQL_MCP_PUBLIC_BASE_URL:-http://127.0.0.1:${SEMEVOSQL_BACKEND_PORT:-28065}}
       SEMEVOSQL_MCP_ENDPOINT: ${SEMEVOSQL_MCP_ENDPOINT:-/mcp}
     ports:
-      - "${SEMEVOSQL_BACKEND_PORT:-28065}:8065"
+      - "${SEMEVOSQL_BIND_HOST:-127.0.0.1}:${SEMEVOSQL_BACKEND_PORT:-28065}:8065"
     volumes:
       - semevosql-uploads:/app/uploads
     depends_on:
@@ -69,14 +67,31 @@ services:
       retries: 18
     restart: unless-stopped
 
+  execution-runner-image:
+    profiles: [app, worker]
+    build:
+      context: ../..
+      dockerfile: deploy/execution/Dockerfile
+    image: semevosql/python-runner:1.0.0
+    command: ["python3", "-c", "import numpy, pandas; print('SemEvoSQL Python runner ready')"]
+    network_mode: none
+    restart: "no"
+
   execution-worker:
     profiles: [app, worker]
     image: ${SEMEVOSQL_BACKEND_IMAGE:-semevosql/backend:local}
-    user: "0:0"
+    user: "${SEMEVOSQL_WORKER_UID:-10001}:${SEMEVOSQL_WORKER_GID:-10001}"
+    group_add:
+      - "${SEMEVOSQL_DOCKER_GID:-0}"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=128m
     environment:
       SEMEVOSQL_RUNTIME_ROLE: execution-worker
       SEMEVOSQL_EXECUTION_INTERNAL_TOKEN: ${SEMEVOSQL_EXECUTION_INTERNAL_TOKEN:?set SEMEVOSQL_EXECUTION_INTERNAL_TOKEN}
-      SEMEVOSQL_EXECUTION_IMAGE: ${SEMEVOSQL_EXECUTION_IMAGE:-continuumio/anaconda3:latest}
+      SEMEVOSQL_EXECUTION_IMAGE: semevosql/python-runner:1.0.0
       SEMEVOSQL_EXECUTION_NETWORK_MODE: none
       SEMEVOSQL_EXECUTION_READ_ONLY_ROOT: "true"
       SEMEVOSQL_EXECUTION_RUN_AS_USER: ${SEMEVOSQL_EXECUTION_RUN_AS_USER:-65534:65534}
@@ -84,6 +99,9 @@ services:
       SERVER_PORT: 8066
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      execution-runner-image:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8066/actuator/health"]
       interval: 10s
@@ -99,7 +117,7 @@ services:
       dockerfile: deploy/Dockerfile-frontend
     image: ${SEMEVOSQL_FRONTEND_IMAGE:-semevosql/frontend:local}
     ports:
-      - "${SEMEVOSQL_FRONTEND_PORT:-23000}:8080"
+      - "${SEMEVOSQL_BIND_HOST:-127.0.0.1}:${SEMEVOSQL_FRONTEND_PORT:-23000}:8080"
     depends_on:
       backend:
         condition: service_healthy
@@ -118,7 +136,7 @@ services:
       MYSQL_ROOT_PASSWORD: ${SEMEVOSQL_DEMO_MYSQL_ROOT_PASSWORD:-}
       SEMEVOSQL_DEMO_MYSQL_READER_PASSWORD: ${SEMEVOSQL_DEMO_MYSQL_READER_PASSWORD:-}
     ports:
-      - "${SEMEVOSQL_DEMO_MYSQL_PORT:-33307}:3306"
+      - "${SEMEVOSQL_BIND_HOST:-127.0.0.1}:${SEMEVOSQL_DEMO_MYSQL_PORT:-33307}:3306"
     volumes:
       - ../config/mysql/product_db.sql:/docker-entrypoint-initdb.d/10-demo.sql:ro
       - ./mysql/20-readonly-user.sh:/docker-entrypoint-initdb.d/20-readonly-user.sh:ro
@@ -139,7 +157,7 @@ services:
       POSTGRES_PASSWORD: ${SEMEVOSQL_DEMO_POSTGRES_ADMIN_PASSWORD:-}
       SEMEVOSQL_DEMO_POSTGRES_READER_PASSWORD: ${SEMEVOSQL_DEMO_POSTGRES_READER_PASSWORD:-}
     ports:
-      - "${SEMEVOSQL_DEMO_POSTGRES_PORT:-35432}:5432"
+      - "${SEMEVOSQL_BIND_HOST:-127.0.0.1}:${SEMEVOSQL_DEMO_POSTGRES_PORT:-35432}:5432"
     volumes:
       - ../config/postgres/china_population_db.sql:/docker-entrypoint-initdb.d/10-demo.sql:ro
       - ./postgres/20-readonly-user.sh:/docker-entrypoint-initdb.d/20-readonly-user.sh:ro

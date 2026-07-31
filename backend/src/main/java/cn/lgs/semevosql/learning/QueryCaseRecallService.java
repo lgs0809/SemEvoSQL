@@ -67,12 +67,17 @@ public class QueryCaseRecallService {
 
 	public List<RecalledQueryCase> recallApproved(Long projectId, Long projectVersionId, String catalogHash,
 			String question, int limit) {
+		return recallApproved(projectId, projectVersionId, catalogHash, question, null, limit);
+	}
+
+	public List<RecalledQueryCase> recallApproved(Long projectId, Long projectVersionId, String catalogHash,
+			String question, String principalId, int limit) {
 		if (projectId == null || projectVersionId == null || !StringUtils.hasText(catalogHash)
 				|| !StringUtils.hasText(question) || limit <= 0) {
 			return List.of();
 		}
 		return rankedCandidates(projectId, projectVersionId, catalogHash, null, question,
-				candidates(projectId, projectVersionId, catalogHash, null, question))
+				candidates(projectId, projectVersionId, catalogHash, null, question), principalId)
 			.stream()
 			.map(scored -> new RecalledQueryCase(Objects.toString(scored.row().get("id")),
 					Objects.toString(scored.row().get("normalized_question")),
@@ -91,22 +96,33 @@ public class QueryCaseRecallService {
 
 	public QueryCaseHints recallHints(Long projectId, Long projectVersionId, String catalogHash, String question,
 			int limit) {
-		return recallHints(projectId, projectVersionId, catalogHash, question, null, limit, true);
+		return recallHints(projectId, projectVersionId, catalogHash, question, null, null, limit, true);
 	}
 
 	public QueryCaseHints recallHints(Long projectId, Long projectVersionId, String catalogHash, String question,
 			String contextHash, int limit) {
-		return recallHints(projectId, projectVersionId, catalogHash, question, contextHash, limit, true);
+		return recallHints(projectId, projectVersionId, catalogHash, question, contextHash, null, limit, true);
+	}
+
+	public QueryCaseHints recallHints(Long projectId, Long projectVersionId, String catalogHash, String question,
+			String contextHash, String principalId, int limit) {
+		return recallHints(projectId, projectVersionId, catalogHash, question, contextHash, principalId, limit, true);
 	}
 
 	QueryCaseHints recallHintsForEvaluation(Long projectId, Long projectVersionId, String catalogHash, String question,
 			String contextHash, int limit) {
-		return recallHints(projectId, projectVersionId, catalogHash, question, contextHash, limit, false);
+		return recallHints(projectId, projectVersionId, catalogHash, question, contextHash, null, limit, false);
 	}
 
 	public String renderApprovedExamples(Long projectId, Long projectVersionId, String catalogHash, String question,
 			int limit) {
-		List<RecalledQueryCase> examples = recallApproved(projectId, projectVersionId, catalogHash, question, limit);
+		return renderApprovedExamples(projectId, projectVersionId, catalogHash, question, null, limit);
+	}
+
+	public String renderApprovedExamples(Long projectId, Long projectVersionId, String catalogHash, String question,
+			String principalId, int limit) {
+		List<RecalledQueryCase> examples = recallApproved(projectId, projectVersionId, catalogHash, question, principalId,
+				limit);
 		if (examples.isEmpty()) {
 			return "";
 		}
@@ -125,13 +141,13 @@ public class QueryCaseRecallService {
 	}
 
 	private QueryCaseHints recallHints(Long projectId, Long projectVersionId, String catalogHash, String question,
-			String contextHash, int limit, boolean recordUsage) {
+			String contextHash, String principalId, int limit, boolean recordUsage) {
 		if (projectId == null || projectVersionId == null || !StringUtils.hasText(catalogHash)
 				|| !StringUtils.hasText(question)) {
 			return QueryCaseHints.empty();
 		}
 		List<ScoredCase> cases = rankedCandidates(projectId, projectVersionId, catalogHash, contextHash, question,
-				candidates(projectId, projectVersionId, catalogHash, contextHash, question))
+				candidates(projectId, projectVersionId, catalogHash, contextHash, question), principalId)
 			.stream()
 			.map(scored -> scoredCase(scored.row(), scored.score(), scored.relevance()))
 			.filter(scored -> scored.plan() != null && scored.relevance() >= MIN_HINT_RELEVANCE)
@@ -188,7 +204,7 @@ public class QueryCaseRecallService {
 	}
 
 	private List<ScoredCandidate> rankedCandidates(Long projectId, Long projectVersionId, String catalogHash,
-			String contextHash, String question, List<Map<String, Object>> rows) {
+			String contextHash, String question, List<Map<String, Object>> rows, String principalId) {
 		if (rows.isEmpty()) {
 			return List.of();
 		}
@@ -215,6 +231,7 @@ public class QueryCaseRecallService {
 		fuse(fused, structured, 2.5);
 		return rows.stream()
 			.filter(row -> repository.trustedForReuse(row, catalogHash))
+			.filter(row -> scopeCompatible(row, principalId))
 			.map(row -> {
 				String id = Objects.toString(row.get("id"));
 				return new ScoredCandidate(row, fused.getOrDefault(id, 0d), relevance.getOrDefault(id, 0d));
@@ -224,6 +241,54 @@ public class QueryCaseRecallService {
 				.reversed()
 				.thenComparing(value -> Objects.toString(value.row().get("id"))))
 			.toList();
+	}
+
+	private boolean scopeCompatible(Map<String, Object> row, String principalId) {
+		String queryCaseId = Objects.toString(row.get("id"), "");
+		if (StringUtils.hasText(queryCaseId)) {
+			List<Map<String, Object>> persisted = repository.bindingDependencies(queryCaseId);
+			if (!persisted.isEmpty()) {
+				return scopeCompatible(persisted, principalId);
+			}
+		}
+		SemanticBlueprint plan = readPlanJson(Objects.toString(row.get("typed_ir_json"), "")).orElse(null);
+		return scopeCompatible(plan, principalId);
+	}
+
+	private static boolean scopeCompatible(List<Map<String, Object>> dependencies, String principalId) {
+		for (Map<String, Object> dependency : dependencies) {
+			String scope = Objects
+				.toString(dependency.get("binding_scope"), Objects.toString(dependency.get("binding_source"), ""))
+				.trim()
+				.toUpperCase(java.util.Locale.ROOT);
+			if ("QUERY".equals(scope) || "PROJECT_PENDING".equals(scope)) {
+				return false;
+			}
+			if ("USER".equals(scope) && (!StringUtils.hasText(principalId)
+					|| !Objects.equals(principalId, Objects.toString(dependency.get("principal_id"), null)))) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	static boolean scopeCompatible(SemanticBlueprint plan, String principalId) {
+		if (plan == null || plan.getBindingDependencies() == null || plan.getBindingDependencies().isEmpty()) {
+			return true;
+		}
+		for (SemanticBlueprint.BindingDependency dependency : plan.getBindingDependencies()) {
+			String scope = Objects.toString(dependency.getScope(), dependency.getSource())
+				.trim()
+				.toUpperCase(java.util.Locale.ROOT);
+			if ("QUERY".equals(scope) || "PROJECT_PENDING".equals(scope)) {
+				return false;
+			}
+			if ("USER".equals(scope) && (!StringUtils.hasText(principalId)
+					|| !Objects.equals(principalId, dependency.getPrincipalId()))) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	private void fuse(Map<String, Double> target, Map<String, Double> scores, double weight) {

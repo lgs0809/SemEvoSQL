@@ -2,11 +2,6 @@ spring:
   config:
     activate:
       on-profile: prod
-  security:
-    oauth2:
-      resourceserver:
-        jwt:
-          issuer-uri: ${SEMEVOSQL_JWT_ISSUER_URI}
 
 semevosql:
   code-executor:
@@ -14,20 +9,14 @@ semevosql:
   sql-execution:
     require-time-filter: true
     reject-full-table-scan: true
+  mcp:
+    enabled: ${SEMEVOSQL_MCP_ENABLED:true}
 
 springdoc:
   api-docs:
     enabled: false
   swagger-ui:
     enabled: false
-
-semevosql:
-  mcp:
-    enabled: ${SEMEVOSQL_MCP_ENABLED:true}
-  security:
-    enabled: true
-  operator:
-    development-mode: false
 
 logging:
   level:

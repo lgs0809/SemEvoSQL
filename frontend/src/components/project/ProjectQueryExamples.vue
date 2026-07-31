@@ -14,11 +14,11 @@
           <el-option
             v-for="version in versions"
             :key="version.id"
-            :label="`${version.versionNumber} · ${version.status}`"
+            :label="`${version.versionNumber} · ${versionStatusLabel(version.status)}`"
             :value="version.id"
           />
         </el-select>
-        <el-select v-model="status" @change="load">
+        <el-select v-model="status" placeholder="筛选案例状态" clearable @change="load">
           <el-option label="全部状态" value="" />
           <el-option label="待确认" value="CANDIDATE" />
           <el-option label="可复用" value="APPROVED" />
@@ -26,7 +26,12 @@
           <el-option label="已拒绝" value="REJECTED" />
           <el-option label="已过期" value="STALE" />
         </el-select>
-        <el-select v-model="rebindStatus" @change="load">
+        <el-select
+          v-model="rebindStatus"
+          placeholder="筛选版本适配"
+          clearable
+          @change="load"
+        >
           <el-option label="全部版本适配状态" value="" />
           <el-option
             v-for="item in rebindStatuses"
@@ -57,7 +62,7 @@
             <template v-if="indexReadiness.dimension"> · {{ indexReadiness.dimension }} 维</template>
           </span>
         </div>
-        <div class="subtle">{{ indexReadiness.detail }}</div>
+        <div class="subtle">{{ indexDetailLabel(indexReadiness.detail) }}</div>
       </div>
       <el-button
         v-if="props.canReindex"
@@ -119,7 +124,7 @@
       </el-table-column>
       <el-table-column label="质量与使用" min-width="190">
         <template #default="scope">
-          <div>{{ scope.row.quality_summary || '暂无摘要' }}</div>
+          <div>{{ qualitySummaryLabel(scope.row.quality_summary) }}</div>
           <div class="subtle">
             命中 {{ scope.row.recall_count || 0 }} · 采用 {{ scope.row.adopted_count || 0 }} · 失败
             {{ scope.row.failed_after_recall_count || 0 }} · 连续问题
@@ -210,13 +215,13 @@
           </template>
         </el-descriptions>
 
-        <h3>当前版本验证 SQL</h3>
+        <h3>当前版本验证语句（SQL）</h3>
         <p class="section-note">
           该 SQL 用于验证此案例；后续实际查询仍会根据当前业务模型重新生成，并经过执行前安全校验。
         </p>
         <pre>{{ selected.sql_text || '-' }}</pre>
         <template v-if="selected.historical_sql_text">
-          <h3>历史版本 SQL</h3>
+        <h3>历史版本查询语句（SQL）</h3>
           <pre>{{ selected.historical_sql_text }}</pre>
         </template>
 
@@ -252,6 +257,7 @@
     type SemanticProjectVersion,
     type ValidatedQueryExample,
   } from '@/services/semevosql';
+  import { versionStatusLabel } from '@/services/displayLabels';
 
   const props = defineProps<{
     projectId: number;
@@ -440,12 +446,40 @@
       INDEX_READY: '向量索引就绪',
       PARTIAL: '向量索引部分就绪',
       REINDEX_REQUIRED: '需要重建向量索引',
-      LEXICAL_ONLY: '当前仅 Exact / BM25',
+      LEXICAL_ONLY: '当前仅精确匹配与 BM25',
     })[value];
   const indexStatusType = (value: QueryCaseIndexReadiness['status']) => {
     if (value === 'INDEX_READY') return 'success';
     if (value === 'PARTIAL' || value === 'REINDEX_REQUIRED') return 'warning';
     return 'info';
+  };
+  const indexDetailLabel = (value?: string) => {
+    if (!value) return '系统会优先使用语义向量召回；索引未就绪时仍保留精确匹配能力。';
+    if (/configured embedding model differs/i.test(value)) {
+      return '当前向量模型与已有索引不一致；重建索引后可恢复完整的语义召回。';
+    }
+    if (/lexical recall remains available/i.test(value)) {
+      return '语义索引暂不可用，但精确匹配仍可继续使用。';
+    }
+    return /[\u4e00-\u9fff]/.test(value) ? value : '索引状态已记录，请按需重建本项目索引。';
+  };
+  const qualitySummaryLabel = (value?: string) => {
+    if (!value) return '暂无执行摘要';
+    try {
+      const parsed = JSON.parse(value) as Record<string, unknown>;
+      const summary: string[] = [];
+      if (typeof parsed.rating === 'number') summary.push(`评分 ${parsed.rating}/5`);
+      if (parsed.structuredPlan === true) summary.push('已保存结构化计划');
+      if (typeof parsed.clarificationCount === 'number' && parsed.clarificationCount > 0) {
+        summary.push(`澄清 ${parsed.clarificationCount} 次`);
+      }
+      if (typeof parsed.retryCount === 'number' && parsed.retryCount > 0) {
+        summary.push(`重试 ${parsed.retryCount} 次`);
+      }
+      return summary.join(' · ') || '已记录执行结果';
+    } catch {
+      return /[\u4e00-\u9fff]/.test(value) ? value : '已记录执行结果';
+    }
   };
   const truth = (value: boolean | number) => value === true || value === 1;
   const versionNumber = (versionId: number) =>

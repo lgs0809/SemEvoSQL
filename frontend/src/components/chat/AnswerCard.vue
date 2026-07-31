@@ -6,7 +6,7 @@
   <article class="answer-card">
     <div class="answer-heading">
       <div>
-        <span class="answer-label">答案</span>
+        <span class="answer-label">查询回答</span>
         <span class="answer-time">{{ formattedTime }}</span>
       </div>
       <el-tag v-if="statusLabel" :type="statusType" size="small" effect="plain">
@@ -15,13 +15,13 @@
     </div>
 
     <section class="answer-section answer-summary">
-      <h3>答案摘要</h3>
+      <h3>结论</h3>
       <div class="answer-content">{{ content }}</div>
     </section>
 
     <section v-if="artifactId" class="answer-section result-section">
       <div class="section-heading">
-        <h3>结果数据</h3>
+        <h3>结果表</h3>
         <span v-if="artifact">{{ artifact.rowCount }} 行</span>
       </div>
       <div v-loading="artifactLoading" class="result-content">
@@ -43,7 +43,7 @@
             v-for="column in artifactColumns"
             :key="column"
             :prop="column"
-            :label="column"
+            :label="friendlyColumnLabel(column)"
             min-width="140"
             show-overflow-tooltip
           />
@@ -74,16 +74,14 @@
     <div class="answer-actions">
       <div v-if="showFeedbackActions" class="feedback-actions">
         <el-button type="success" plain :loading="feedbackLoading" @click="emit('trust')">
-          结果正确
+          确认结果正确
         </el-button>
-        <el-button type="danger" plain @click="emit('correct')">这里理解错了</el-button>
+        <el-button type="danger" plain @click="emit('correct')">纠正这条理解</el-button>
       </div>
       <div class="detail-actions">
         <el-button v-if="explanation" link type="primary" @click="evidenceOpen = !evidenceOpen">
           {{ evidenceOpen ? '收起依据' : '查看依据' }}
         </el-button>
-        <el-button v-if="runId" link type="primary" @click="emit('diagnosis')">查询诊断</el-button>
-        <el-button v-if="runId" link @click="emit('run-details')">运行详情</el-button>
       </div>
     </div>
 
@@ -115,8 +113,7 @@
               v-for="(definition, index) in explanation.businessDefinitions"
               :key="`definition-${index}`"
             >
-              {{ definition.name || definition.code || '-' }}
-              <span v-if="definition.expression">：{{ definition.expression }}</span>
+              {{ definition.name || definition.code || '业务定义' }}
             </li>
           </ul>
         </div>
@@ -132,7 +129,7 @@
           <strong>数据来源</strong>
           <ul>
             <li v-for="(model, index) in explanation.models" :key="`model-${index}`">
-              {{ model.name || model.code || '-' }} → {{ model.table || '-' }}
+              {{ friendlyModelLabel(model) }}
             </li>
           </ul>
         </div>
@@ -155,6 +152,10 @@
             }}</pre>
           </el-collapse-item>
         </el-collapse>
+        <div v-if="runId" class="evidence-actions">
+          <el-button link type="primary" @click="emit('diagnosis')">查询诊断</el-button>
+          <el-button link @click="emit('run-details')">执行详情</el-button>
+        </div>
       </section>
     </el-collapse-transition>
   </article>
@@ -207,10 +208,8 @@
       .slice(0, 3)
       .map(item => {
         const name = String(item.name || item.businessName || item.code || '').trim();
-        const definition = String(
-          item.description || item.definition || item.expression || '',
-        ).trim();
-        if (!name) return definition;
+        const definition = String(item.description || item.definition || '').trim();
+        if (!name) return definition || '业务定义';
         return definition && definition !== name ? `${name}：${definition}` : name;
       })
       .filter(Boolean);
@@ -232,10 +231,36 @@
   const sourceText = computed(() =>
     (props.explanation?.models || [])
       .slice(0, 5)
-      .map(item => String(item.name || item.code || item.table || ''))
+      .map(item => friendlyModelLabel(item))
       .filter(Boolean)
       .join('、'),
   );
+
+  const friendlyColumnLabel = (column: string) => {
+    const normalized = column.trim().toLowerCase();
+    const persisted = props.explanation?.resultColumns?.find(
+      item => String(item.key || '').trim().toLowerCase() === normalized,
+    );
+    if (persisted?.label) return persisted.label;
+    const definitions = props.explanation?.businessDefinitions || [];
+    const definition = definitions.find(item => {
+      const code = String(item.code || '').trim().toLowerCase();
+      return code && code === normalized && String(item.name || '').trim();
+    });
+    if (definition) return String(definition.name).trim();
+    const binding = (props.explanation?.semanticBindings || []).find(item => {
+      const key = String(item.assetKey || '').trim().toLowerCase();
+      return key && key === normalized && String(item.businessLabel || item.displayName || '').trim();
+    });
+    return String(binding?.businessLabel || binding?.displayName || '结果字段');
+  };
+
+  const friendlyModelLabel = (model: Record<string, unknown>) => {
+    const named = String(model.name || model.businessName || '').trim();
+    const code = String(model.code || model.table || '').trim();
+    if (named && named !== code) return named;
+    return '业务对象';
+  };
 
   const bindingSourceLabel = (source: string) => {
     if (source === 'USER') return '你的偏好';
@@ -257,10 +282,10 @@
     max-width: 860px;
     margin: 0 auto 22px;
     overflow: hidden;
-    border: 1px solid #dbe3ee;
-    border-radius: 16px;
+    border: 1px solid #dce8e8;
+    border-radius: 14px;
     background: #fff;
-    box-shadow: 0 8px 24px rgb(15 23 42 / 5%);
+    box-shadow: 0 10px 24px rgb(20 63 65 / 6%);
   }
   .answer-heading,
   .section-heading,
@@ -272,8 +297,8 @@
   }
   .answer-heading {
     padding: 14px 18px;
-    border-bottom: 1px solid #eef2f7;
-    background: #fbfdff;
+    border-bottom: 1px solid #edf3f2;
+    background: #f7fbfa;
   }
   .answer-heading > div {
     display: flex;
@@ -281,22 +306,22 @@
     gap: 10px;
   }
   .answer-label {
-    color: #0f172a;
+    color: #17353b;
     font-weight: 700;
   }
   .answer-time,
   .section-heading span {
-    color: #94a3b8;
+    color: #63777e;
     font-size: 12px;
   }
   .answer-section {
     padding: 18px;
-    border-bottom: 1px solid #eef2f7;
+    border-bottom: 1px solid #edf3f2;
   }
   .answer-section h3,
   .section-heading h3 {
     margin: 0 0 10px;
-    color: #334155;
+    color: #46636a;
     font-size: 13px;
     font-weight: 650;
   }
@@ -304,7 +329,7 @@
     margin: 0;
   }
   .answer-content {
-    color: #172033;
+    color: #213e46;
     white-space: pre-wrap;
     line-height: 1.78;
   }
@@ -316,7 +341,7 @@
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 10px;
-    background: #fbfdff;
+    background: #f7fbfa;
   }
   .trust-item {
     display: grid;
@@ -325,12 +350,12 @@
     min-width: 0;
   }
   .trust-item span {
-    color: #64748b;
+    color: #63777e;
     font-size: 11px;
   }
   .trust-item strong {
     overflow: hidden;
-    color: #334155;
+    color: #46636a;
     font-size: 12px;
     font-weight: 600;
     text-overflow: ellipsis;
@@ -347,13 +372,13 @@
   }
   .evidence-panel {
     padding: 4px 18px 18px;
-    border-top: 1px solid #eef2f7;
-    background: #f8fafc;
+    border-top: 1px solid #edf3f2;
+    background: #f5f9f8;
   }
   .evidence-section {
     padding: 12px 0;
-    border-bottom: 1px dashed #dbe3ee;
-    color: #334155;
+    border-bottom: 1px dashed #d6e6e3;
+    color: #46636a;
     line-height: 1.65;
   }
   .evidence-section strong {
@@ -369,6 +394,13 @@
   .sql-collapse {
     margin-top: 8px;
     border: 0;
+  }
+  .evidence-actions {
+    display: flex;
+    gap: 4px;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px dashed #d6e6e3;
   }
   .sql-collapse pre {
     overflow-x: auto;

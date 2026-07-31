@@ -12,7 +12,7 @@
 ```sql
 {sql}
 ```
-*这里审计的是 Query Preflight 后的 Physical SQL。Semantic SQL 中的 `METRIC(...)` / `RELATIONSHIP(...)` 已由系统确定性展开；不要要求 Physical SQL 保留这些编译原语。*
+*Advanced execution 审计的是模型生成的 Semantic SQL，而不是 Query Preflight 注入系统物化 CTE 后的 Physical SQL。`METRIC(...)` / `RELATIONSHIP(...)` 是受治理的 Semantic SQL 编译原语，只要其引用与 Semantic Blueprint 一致，就视为合法表达式；不要把它们当成数据库原生函数做语法报错。Physical SQL 的原语展开、系统物化 CTE、额外支撑列由 Query Preflight、AST/Safety Guard 与 EXPLAIN/Cost Guard 单独验证。*
 
 ## 3. 数据库 Schema (事实标准)
 {schema_info}
@@ -39,6 +39,8 @@
 粒度与 Join：SQL 是否遵守模型 Grain、发布关系和 Cardinality？若 `preAggregationModelCodes` 非空，是否先聚合后 JOIN，避免 Fan-out？
 业务规则：SQL 是否应用了计划中的强制规则，且没有使用外部证据覆盖正式定义？
 NULL 语义：Catalog 中 `nullable=true` 只是事实，不是自动过滤规则。不要要求所有 nullable 字段都 `IS NOT NULL`。若当前步骤明确要求连续/有序时间序列、LAG/LEAD、同比环比等，应结合具体时间字段判断 NULL bucket 是否会破坏当前步骤；若用户明确查询未支付、缺失时间或 NULL 分布，则保留 NULL 是正确的。多时间字段分别判断，不得套用一个全局时间规则。
+对时间 bucket、窗口排序或周期比较使用的受治理时间轴，若用户没有要求把缺失时间当作业务类别，`time_column IS NOT NULL` 是防止 NULL bucket 破坏排序/比较的执行层完整性保护，不是擅自新增时间范围或业务过滤，不得因此判定不通过。
+排序 NULL 事实必须按当前方言判断：MySQL 默认升序时 NULL 在前、降序时 NULL 在后；PostgreSQL 默认升序时 NULL 在后、降序时 NULL 在前（可用 `NULLS LAST`）。不得使用相反的方言规则制造虚假逻辑错误。
 注意：如果指令只要求“查询北京”，而 SQL 没查“上海”，这是通过的。
 
 ## 维度 2：结构正确性 (Syntax & Schema)

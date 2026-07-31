@@ -30,6 +30,7 @@ import cn.lgs.semevosql.util.FluxUtil;
 import cn.lgs.semevosql.util.MarkdownParserUtil;
 import cn.lgs.semevosql.util.PlanProcessUtil;
 import cn.lgs.semevosql.util.StateUtil;
+import cn.lgs.semevosql.run.RunDeadlineUtil;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -107,7 +108,8 @@ public class PythonGenerateNode implements NodeAction {
 					objectMapper.writeValueAsString(sqlResults.stream().limit(SAMPLE_DATA_NUMBER).toList()),
 					"plan_description", objectMapper.writeValueAsString(toolParameters)));
 
-		Flux<ChatResponse> pythonGenerateFlux = llmService.call(systemPrompt, userPrompt);
+		Flux<ChatResponse> pythonGenerateFlux = llmService.callWithin(systemPrompt, userPrompt,
+				RunDeadlineUtil.remaining(state));
 
 		Flux<GraphResponse<StreamingOutput>> generator = FluxUtil.createStreamingGeneratorWithMessages(this.getClass(),
 				state, aiResponse -> {

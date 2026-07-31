@@ -15,6 +15,7 @@
  */
 package cn.lgs.semevosql.workflow.node;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -33,6 +34,17 @@ class SemanticConsistencyNodeTest {
 		assertTrue(SemanticConsistencyNode.advancedExecutionStructureErrors("Use LAG with PARTITION BY created_at_month",
 				"SELECT LAG(amount) OVER (PARTITION BY created_at_month ORDER BY paid_at_week) FROM t")
 			.isEmpty());
+	}
+
+	@Test
+	void advancedConsistencyReviewsModelAuthoredSemanticSqlInsteadOfSystemMaterializationSql() {
+		String semanticSql = "SELECT METRIC('o.effective_paid_amount') AS effective_paid_amount FROM qw_bench_order o";
+		String physicalSql = "WITH __qw_model_qw_bench_order AS (SELECT channel_code, paid_at, paid_amount, refund_amount FROM qw_bench_order) SELECT * FROM __qw_model_qw_bench_order";
+
+		assertThat(SemanticConsistencyNode.consistencyReviewSql("SEMANTIC_SQL", semanticSql, physicalSql))
+			.isEqualTo(semanticSql);
+		assertThat(SemanticConsistencyNode.consistencyReviewSql("DETERMINISTIC", semanticSql, physicalSql))
+			.isEqualTo(physicalSql);
 	}
 
 	@Test

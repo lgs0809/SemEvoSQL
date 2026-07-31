@@ -61,7 +61,7 @@ public class CodeExecutorProperties {
 	 * Image name, can customize image with common third-party dependencies to replace
 	 * this configuration
 	 */
-	String imageName = "continuumio/anaconda3:latest";
+	String imageName = "semevosql/python-runner:1.0.0";
 
 	/**
 	 * Container name prefix

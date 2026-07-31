@@ -25,6 +25,7 @@ import cn.lgs.semevosql.util.FluxUtil;
 import cn.lgs.semevosql.util.PlanProcessUtil;
 import cn.lgs.semevosql.util.StateUtil;
 import cn.lgs.semevosql.util.ChatResponseUtil;
+import cn.lgs.semevosql.run.RunDeadlineUtil;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatResponse;
@@ -83,7 +84,8 @@ public class PythonAnalyzeNode implements NodeAction {
 		String systemPrompt = PromptConstant.getPythonAnalyzePromptTemplate()
 			.render(Map.of("python_output", pythonOutput, "user_query", userQuery));
 
-		Flux<ChatResponse> pythonAnalyzeFlux = llmService.callSystem(systemPrompt);
+		Flux<ChatResponse> pythonAnalyzeFlux = llmService.callSystemWithin(systemPrompt,
+				RunDeadlineUtil.remaining(state));
 
 		Flux<GraphResponse<StreamingOutput>> generator = FluxUtil.createStreamingGeneratorWithMessages(this.getClass(),
 				state, "正在分析代码运行结果...\n", "\n结果分析完成。", aiResponse -> {

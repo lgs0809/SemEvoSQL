@@ -32,7 +32,9 @@ import cn.lgs.semevosql.run.QueryRun;
 import cn.lgs.semevosql.run.QueryRun.RunStatus;
 import cn.lgs.semevosql.run.QueryRun.RunType;
 import cn.lgs.semevosql.run.QueryRunService;
+import cn.lgs.semevosql.run.LateRunResultDroppedException;
 import cn.lgs.semevosql.run.RunLeaseUnavailableException;
+import cn.lgs.semevosql.run.RunExecutionFenceService;
 import cn.lgs.semevosql.run.QueryRunService.CreateRunCommand;
 import cn.lgs.semevosql.semantic.domain.SemanticAssetStatus;
 import cn.lgs.semevosql.semantic.domain.SemanticCatalogSnapshot;
@@ -111,6 +113,8 @@ public class SemEvoSQLProductionService {
 
 	private final ProductionGoldenReplayRunner goldenReplayRunner;
 
+	private final RunExecutionFenceService executionFence;
+
 	private volatile long initializationTaskTimeoutMs = 600000L;
 
 	private volatile long evaluationTaskTimeoutMs = 600000L;
@@ -129,7 +133,7 @@ public class SemEvoSQLProductionService {
 			EpisodeApplicationService episodeApplicationService, ValidatedQueryExampleService queryExampleService,
 			TrajectoryAnalysisService trajectoryAnalysisService,
 			QueryPatternTemplateService patternTemplateService, ControlledReleaseService controlledReleaseService,
-			ProductionGoldenReplayRunner goldenReplayRunner) {
+			ProductionGoldenReplayRunner goldenReplayRunner, RunExecutionFenceService executionFence) {
 		this.jdbc = jdbc;
 		this.initializationExecutor = initializationExecutor;
 		this.evaluationExecutor = evaluationExecutor;
@@ -142,6 +146,7 @@ public class SemEvoSQLProductionService {
 		this.patternTemplateService = patternTemplateService;
 		this.controlledReleaseService = controlledReleaseService;
 		this.goldenReplayRunner = goldenReplayRunner;
+		this.executionFence = executionFence;
 	}
 
 	@Autowired
@@ -268,6 +273,7 @@ public class SemEvoSQLProductionService {
 		if (!existing.isEmpty()) {
 			return existing.get(0);
 		}
+		assertAttemptAcceptsRuntimeEffects(attemptId);
 		String id = id();
 		int inserted = jdbc.update("""
 				INSERT INTO qw_sql_trace
@@ -288,9 +294,29 @@ public class SemEvoSQLProductionService {
 
 	@Transactional
 	public Map<String, Object> completeEpisode(String episodeId, CompletionRequest request) {
+		return completeEpisode(episodeId, request, null);
+	}
+
+	@Transactional
+	public Map<String, Object> completeEpisode(String episodeId, CompletionRequest request, String attemptId) {
 		String acceptedAttemptId = jdbc.query("""
 				SELECT id FROM qw_attempt WHERE episode_id = ? ORDER BY attempt_no DESC LIMIT 1
 				""", (rs, rowNum) -> rs.getString(1), episodeId).stream().findFirst().orElse(null);
+		if (attemptId != null && !attemptId.isBlank()) {
+			Map<String, Object> binding = jdbc.queryForList("""
+					SELECT run_id, attempt_id FROM qw_query_run
+					WHERE episode_id = ? AND attempt_id = ?
+					ORDER BY update_time DESC LIMIT 1
+					""", episodeId, attemptId).stream().findFirst().orElse(null);
+			if (binding == null) {
+				throw new LateRunResultDroppedException("Episode completion belongs to a superseded attempt: " + attemptId);
+			}
+			String runId = Objects.toString(binding.get("run_id"), "");
+			if (executionFence != null && !runId.isBlank()) {
+				executionFence.assertFinalizerOwnsRunAndLock(runId, attemptId);
+			}
+			acceptedAttemptId = attemptId;
+		}
 		episodeApplicationService.complete(episodeId, request.status(), request.status(), acceptedAttemptId, null);
 		jdbc.update("""
 				UPDATE qw_episode SET error_type = ?, token_count = ?, duration_ms = ?, update_time = CURRENT_TIMESTAMP
@@ -1125,6 +1151,7 @@ public class SemEvoSQLProductionService {
 		if (!existing.isEmpty()) {
 			return existing.get(0);
 		}
+		assertAttemptAcceptsRuntimeEffects(attemptId);
 		String id = id();
 		int inserted = jdbc.update("INSERT INTO " + table
 				+ "(id, attempt_id, idempotency_key, node_name, status, input_summary, output_summary, decision_summary, effect_summary, contribution_score, cost_json, result_proof_json, reused, correction_type, duration_ms, error_type, create_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) ON CONFLICT (attempt_id, idempotency_key) DO NOTHING",
@@ -1139,6 +1166,33 @@ public class SemEvoSQLProductionService {
 		}
 		return one("SELECT * FROM " + table + " WHERE attempt_id = ? AND idempotency_key = ?", attemptId,
 				request.idempotencyKey());
+	}
+
+	private void assertAttemptAcceptsRuntimeEffects(String attemptId) {
+		// Lock both sides of the binding before the trace insert. A terminal transition locks
+		// the same Run row, so it cannot slip between the status check and the side effect.
+		List<String> bound = jdbc.query("""
+				SELECT a.id
+				FROM qw_attempt a
+				JOIN qw_query_run r ON r.run_id = a.run_id
+				WHERE a.id = ? AND a.status = 'RUNNING'
+				  AND r.status = 'RUNNING' AND r.attempt_id = a.id
+				  AND (r.deadline_epoch_millis IS NULL
+				       OR r.deadline_epoch_millis > CAST(EXTRACT(EPOCH FROM CURRENT_TIMESTAMP) * 1000 AS BIGINT))
+				FOR UPDATE OF a, r
+				""", (rs, rowNum) -> rs.getString(1), attemptId);
+		if (!bound.isEmpty()) {
+			return;
+		}
+		List<String> unbound = jdbc.query("""
+				SELECT id FROM qw_attempt
+				WHERE id = ? AND status = 'RUNNING' AND run_id IS NULL
+				FOR UPDATE
+				""", (rs, rowNum) -> rs.getString(1), attemptId);
+		if (unbound.isEmpty()) {
+			throw new LateRunResultDroppedException(
+					"Attempt no longer accepts runtime effects: " + attemptId);
+		}
 	}
 
 	private Map<String, Object> episode(String id) {

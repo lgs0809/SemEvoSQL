@@ -15,6 +15,7 @@
  */
 package cn.lgs.semevosql.clarification;
 
+import cn.lgs.semevosql.evolution.LowRiskSemanticEvolutionCandidateEvent;
 import cn.lgs.semevosql.evolution.SemanticPatch;
 import cn.lgs.semevosql.evolution.SemanticPatch.Operation;
 import cn.lgs.semevosql.evolution.SemanticPatch.OperationType;
@@ -26,6 +27,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -43,6 +46,13 @@ public class ProjectSemanticAliasProposalService {
 	private final LegacyEvolutionChangeSetBridge changeSetBridge;
 
 	private final ObjectMapper mapper = JsonUtil.getObjectMapper();
+
+	private ApplicationEventPublisher eventPublisher;
+
+	@Autowired
+	public void setEventPublisher(ApplicationEventPublisher eventPublisher) {
+		this.eventPublisher = eventPublisher;
+	}
 
 	public ProjectSemanticAliasProposalService(JdbcTemplate jdbc, SemanticProjectRepository projectRepository,
 			SemanticBindingTargetValidator targetValidator, LegacyEvolutionChangeSetBridge changeSetBridge) {
@@ -81,6 +91,7 @@ public class ProjectSemanticAliasProposalService {
 			var bridged = changeSetBridge.linkCandidate(projectId, sourceVersionId, existing.id(),
 					"PROJECT_ALIAS_PROPOSAL", "PROJECT_ALIAS", normalizedPhrase, "LOW", existing.patchJson(), evidence,
 					null, principal);
+			publishLowRiskCandidate(existing.id());
 			return new ProposalResult(existing.id(), bridged.semanticChangeSetId(), sourceVersionId, normalizedPhrase,
 					"CANDIDATE");
 		}
@@ -110,8 +121,15 @@ public class ProjectSemanticAliasProposalService {
 		var bridged = changeSetBridge.linkCandidate(projectId, sourceVersionId, persisted.id(),
 				"PROJECT_ALIAS_PROPOSAL", "PROJECT_ALIAS", normalizedPhrase, "LOW", json(patch), evidence, null,
 				principal);
+		publishLowRiskCandidate(persisted.id());
 		return new ProposalResult(persisted.id(), bridged.semanticChangeSetId(), sourceVersionId, normalizedPhrase,
 				"CANDIDATE");
+	}
+
+	private void publishLowRiskCandidate(String candidateId) {
+		if (eventPublisher != null && candidateId != null && !candidateId.isBlank()) {
+			eventPublisher.publishEvent(new LowRiskSemanticEvolutionCandidateEvent(candidateId));
+		}
 	}
 
 	private PendingProposal findPending(Long sourceVersionId, String catalogHash, String normalizedPhrase) {

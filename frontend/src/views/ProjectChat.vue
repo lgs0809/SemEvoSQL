@@ -3,15 +3,19 @@
  * Licensed under the Apache License, Version 2.0.
  -->
 <template>
-  <BaseLayout>
+  <BaseLayout focus>
     <div class="chat-shell">
       <aside class="conversation-sidebar">
         <div class="sidebar-title">
-          <strong>项目问数</strong>
+          <div>
+            <span class="sidebar-kicker">SemEvoSQL</span>
+            <strong>查询会话</strong>
+          </div>
           <el-button
             circle
             :icon="Plus"
             :disabled="!canCreateConversation"
+            title="新建查询会话"
             @click="createConversation"
           />
         </div>
@@ -19,13 +23,32 @@
           v-model="selectedProjectId"
           filterable
           placeholder="选择项目"
-          @change="loadProject()"
+          @change="selectProject"
         >
           <el-option v-for="item in projects" :key="item.id" :label="item.name" :value="item.id" />
         </el-select>
+        <div class="conversation-tools">
+          <el-input
+            v-model="conversationSearch"
+            clearable
+            :prefix-icon="Search"
+            placeholder="搜索历史查询"
+          />
+          <div class="conversation-count">
+            <span>{{ conversationCountLabel }}</span>
+            <el-button
+              v-if="hasMoreConversations || showAllConversations"
+              link
+              size="small"
+              @click="showAllConversations = !showAllConversations"
+            >
+              {{ showAllConversations ? '收起历史' : '显示全部历史' }}
+            </el-button>
+          </div>
+        </div>
         <div class="conversation-list" v-loading="conversationLoading">
           <button
-            v-for="item in conversations"
+            v-for="item in visibleConversations"
             :key="item.conversationId"
             class="conversation"
             :class="{ active: item.conversationId === activeConversationId }"
@@ -34,7 +57,7 @@
             <strong>{{ item.title }}</strong>
             <span>{{ formatTime(item.updateTime) }}</span>
           </button>
-          <el-empty v-if="!conversations.length" :image-size="72" description="暂无会话" />
+          <el-empty v-if="!visibleConversations.length" :image-size="72" :description="conversationEmptyLabel" />
         </div>
       </aside>
 
@@ -44,7 +67,7 @@
             v-model="selectedProjectId"
             filterable
             placeholder="选择项目"
-            @change="loadProject()"
+            @change="selectProject"
           >
             <el-option
               v-for="item in projects"
@@ -70,18 +93,23 @@
             circle
             :icon="Plus"
             :disabled="!canCreateConversation"
+            title="新建查询会话"
             @click="createConversation"
           />
         </div>
 
         <header class="chat-header">
+          <button class="focus-brand" type="button" aria-label="返回项目工作台" @click="router.push('/projects')">
+            <span class="focus-brand-mark"><i class="bi bi-stars"></i></span>
+            <span>SemEvoSQL</span>
+          </button>
           <div>
-            <h1>{{ selectedProject?.project.name || '选择一个项目开始问数' }}</h1>
+            <h1>{{ selectedProject?.project.name || '选择项目开始查询' }}</h1>
             <span v-if="activeConversation">
-              此会话使用业务模型 v{{ conversationVersion?.versionNumber || '-' }}
+              业务模型 v{{ conversationVersion?.versionNumber || '-' }} · {{ activeConversation.title }}
             </span>
             <span v-else-if="activeVersion">当前业务模型 v{{ activeVersion.versionNumber }}</span>
-            <span v-else>项目尚未发布可问数的业务模型</span>
+            <span v-else-if="selectedProject">项目尚未发布可用于查询的业务模型</span>
           </div>
           <div class="run-actions">
             <el-tag
@@ -89,15 +117,9 @@
               :type="selectedProjectHealth.queryReady ? 'success' : 'warning'"
               effect="plain"
             >
-              {{ selectedProjectHealth.queryReady ? '项目可问数' : '项目准备中' }}
+              {{ selectedProjectHealth.queryReady ? '查询入口已就绪' : '业务模型待发布' }}
             </el-tag>
-            <el-button v-if="activeRun && canResume" @click="resumeRun">继续查询</el-button>
-            <el-button v-if="activeRun" link type="primary" @click="openDiagnosis(activeRun.runId)">
-              查询诊断
-            </el-button>
-            <el-button v-if="activeRun" link @click="openRunDetails(activeRun.runId)">
-              运行详情
-            </el-button>
+            <el-button v-if="activeRun && canResume" @click="resumeRun">继续执行</el-button>
             <el-button v-if="activeRun && !terminalRun" type="danger" plain @click="cancelRun">
               取消查询
             </el-button>
@@ -110,7 +132,7 @@
           type="error"
           show-icon
           :closable="false"
-          title="问数页面初始化失败"
+          title="查询工作台初始化失败"
         >
           <template #default>
             <div class="inline-recovery">
@@ -160,14 +182,14 @@
           type="warning"
           show-icon
           :closable="false"
-          title="新问数暂时不可用"
+          title="暂时无法创建新查询"
         >
           <template #default>
             <span>
               {{
                 platformReadinessError
                   ? '模型能力状态暂时无法确认。历史会话和已有结果仍可查看。'
-                  : 'Chat Model、Embedding Model 或 Rerank Model 当前不可用。历史会话和已有结果仍可查看。'
+                  : '模型服务当前不可用。历史会话和已有结果仍可查看。'
               }}
             </span>
           </template>
@@ -226,8 +248,28 @@
             </template>
           </el-alert>
 
+          <section v-if="!selectedProjectId" class="project-selection-empty">
+            <div class="selection-icon"><i class="bi bi-folder2-open"></i></div>
+            <span class="selection-kicker">开始查询</span>
+            <h2>先选择项目，再开始查询</h2>
+            <p>每次查询都会绑定到所选项目的业务模型、数据连接和语义规则，不会跨项目混用口径。</p>
+            <el-select
+              v-model="selectedProjectId"
+              class="selection-control"
+              filterable
+              placeholder="选择要查询的项目"
+              @change="loadProject()"
+            >
+              <el-option v-for="item in projects" :key="item.id" :label="item.name" :value="item.id" />
+            </el-select>
+            <el-button v-if="!projects.length" type="primary" @click="router.push('/projects/create')">
+              创建项目
+            </el-button>
+            <small v-else>选定项目后，左侧会显示该项目的历史查询。</small>
+          </section>
+
           <ChatWelcome
-            v-if="!activeConversation"
+            v-else-if="!activeConversation"
             :has-project="Boolean(selectedProject)"
             :project-name="selectedProject?.project.name || '当前项目'"
             :project-status="selectedProject?.project.status"
@@ -246,8 +288,8 @@
             <el-card v-if="clarification" shadow="never" class="clarification-card">
               <template #header>
                 <div class="event-heading">
-                  <strong>请确认你的业务含义</strong>
-                  <span>确认后会从当前查询继续</span>
+                  <strong>请确认这条业务口径</strong>
+                  <span>确认后会从当前查询继续执行</span>
                 </div>
               </template>
               <h3>{{ clarification.question }}</h3>
@@ -277,9 +319,9 @@
                 <span>这次选择：</span>
                 <el-radio-group v-model="selectedClarificationScope" size="small">
                   <el-radio-button value="QUERY">仅本次</el-radio-button>
-                  <el-radio-button value="USER">记住我的选择</el-radio-button>
+                  <el-radio-button value="USER">记住我的习惯</el-radio-button>
                   <el-radio-button v-if="canSubmitProjectRule" value="PROJECT">
-                    提交为项目规则
+                    作为项目统一定义
                   </el-radio-button>
                 </el-radio-group>
               </div>
@@ -298,8 +340,8 @@
             <el-card v-else-if="humanReviewRequired" shadow="never" class="human-review-card">
               <template #header>
                 <div class="event-heading">
-                  <strong>需要确认查询理解</strong>
-                  <span>确认后按当前理解串行执行查询任务</span>
+                  <strong>请确认查询计划</strong>
+                  <span>确认后会按当前理解生成并执行查询</span>
                 </div>
               </template>
               <p class="human-review-summary">{{ humanReviewSummary }}</p>
@@ -414,7 +456,7 @@
                     <template v-if="bindingCorrectionCategory">
                       <el-input
                         v-model="correctionRawExpression"
-                        placeholder="原问题里的说法，例如：流水、客户、支付状态"
+                        placeholder="输入原问题中的业务词或短语"
                       />
                       <el-select
                         v-model="correctionAssetKey"
@@ -437,7 +479,7 @@
                         <el-radio-button value="QUERY">仅修正这次</el-radio-button>
                         <el-radio-button value="USER">以后按我的习惯理解</el-radio-button>
                         <el-radio-button v-if="canSubmitProjectRule" value="PROJECT">
-                          提交为项目规则
+                          作为项目统一定义
                         </el-radio-button>
                       </el-radio-group>
                     </template>
@@ -490,7 +532,7 @@
                         prompt.businessLabel
                       }}”。{{
                         canSubmitProjectRule
-                          ? '可以提交为项目规则，由后续审核和版本发布决定是否对所有人使用。'
+                          ? '可以升级为项目统一定义；通过语义验证、回归与发布后才会对项目共享。'
                           : '系统会继续把它作为你的个人选择使用。'
                       }}
                     </span>
@@ -502,14 +544,14 @@
                         :loading="preferenceActionId === prompt.preferenceId"
                         @click="handlePreferenceUpgrade(prompt.preferenceId, 'PROMOTE')"
                       >
-                        提交为项目规则
+                        升级为项目统一定义
                       </el-button>
                       <el-button
                         size="small"
                         :loading="preferenceActionId === prompt.preferenceId"
                         @click="handlePreferenceUpgrade(prompt.preferenceId, 'CONTINUE')"
                       >
-                        继续只记住我的选择
+                        继续作为我的习惯
                       </el-button>
                       <el-button
                         size="small"
@@ -535,58 +577,60 @@
           </template>
         </section>
 
-        <footer class="composer">
-          <el-input
-            v-model="message"
-            type="textarea"
-            :autosize="{ minRows: 2, maxRows: 6 }"
-            placeholder="例如：对比本月订单金额和财务确认收入"
-            :disabled="
-              !queryCapabilityReady ||
-              !conversationVersion ||
-              !activeConversation ||
-              sending ||
-              runBusy
-            "
-            @keydown.ctrl.enter.prevent="send"
-            @keydown.meta.enter.prevent="send"
-          />
-          <div class="composer-footer">
-            <div class="composer-options">
-              <span>
-                {{
-                  conversationVersion
-                    ? `使用业务模型 v${conversationVersion.versionNumber}；Ctrl/⌘ + Enter 发送`
-                    : '这个会话没有可用的业务模型'
-                }}
-              </span>
-              <el-radio-group
-                v-model="approvalMode"
-                size="small"
-                :disabled="sending || runBusy"
-                aria-label="查询执行方式"
-              >
-                <el-radio-button value="REQUIRE_APPROVAL">请求批准</el-radio-button>
-                <el-radio-button value="AUTO_EXECUTE">自动执行</el-radio-button>
-              </el-radio-group>
-              <small>业务语义不明确时，两种模式都会先请求澄清。</small>
-            </div>
-            <el-button
-              type="primary"
-              :loading="sending"
+        <footer v-if="selectedProjectId" class="composer">
+          <div class="composer-surface">
+            <el-input
+              v-model="message"
+              class="composer-input"
+              type="textarea"
+              :autosize="{ minRows: 2, maxRows: 6 }"
+              aria-label="要查询的业务问题"
+              placeholder="请先选择项目，再输入你要查询的具体业务问题"
               :disabled="
                 !queryCapabilityReady ||
                 !conversationVersion ||
                 !activeConversation ||
-                !message.trim() ||
+                sending ||
                 runBusy
               "
-              :icon="Promotion"
-              @click="send"
-            >
-              发送
-            </el-button>
+              @keydown.ctrl.enter.prevent="send"
+              @keydown.meta.enter.prevent="send"
+            />
+            <div class="composer-footer">
+              <div class="composer-options">
+                <el-select
+                  v-model="approvalMode"
+                  size="small"
+                  class="approval-select"
+                  :disabled="sending || runBusy"
+                  aria-label="查询执行方式"
+                >
+                  <el-option label="先确认业务口径" value="REQUIRE_APPROVAL" />
+                  <el-option label="直接执行查询" value="AUTO_EXECUTE" />
+                </el-select>
+                <small>
+                  {{ conversationVersion ? `业务模型 v${conversationVersion.versionNumber}` : '当前会话没有可用的业务模型' }}
+                  · Ctrl/⌘ + Enter 发送
+                </small>
+              </div>
+              <el-button
+                type="primary"
+                :loading="sending"
+                :disabled="
+                  !queryCapabilityReady ||
+                  !conversationVersion ||
+                  !activeConversation ||
+                  !message.trim() ||
+                  runBusy
+                "
+                :icon="Promotion"
+                @click="send"
+              >
+                发送
+              </el-button>
+            </div>
           </div>
+          <p class="composer-note">业务语义不明确时，系统会先请你确认，再继续生成查询。</p>
         </footer>
       </main>
     </div>
@@ -608,10 +652,18 @@
 </template>
 
 <script setup lang="ts">
-  import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+  import {
+    computed,
+    defineAsyncComponent,
+    nextTick,
+    onBeforeUnmount,
+    onMounted,
+    ref,
+    watch,
+  } from 'vue';
   import { useRoute, useRouter } from 'vue-router';
   import { ElMessage } from 'element-plus';
-  import { Plus, Promotion } from '@element-plus/icons-vue';
+  import { Plus, Promotion, Search } from '@element-plus/icons-vue';
   import BaseLayout from '@/layouts/BaseLayout.vue';
   import { platformContext, type PlatformReadiness } from '@/services/platformContext';
   import AnswerCard from '@/components/chat/AnswerCard.vue';
@@ -628,7 +680,6 @@
   } from '@/services/runRecoveryState.mjs';
   import {
     semEvoSQLService,
-    type ProjectAccessView,
     type ProjectConversation,
     type ProjectHealth,
     type ProjectInitializationView,
@@ -674,7 +725,6 @@
   const versions = ref<SemanticProjectVersion[]>([]);
   const selectedProject = ref<ProjectInitializationView>();
   const selectedProjectId = ref<number>();
-  const selectedProjectAccess = ref<ProjectAccessView>();
   const selectedProjectHealth = ref<ProjectHealth>();
   const initializationError = ref('');
   const platformReadiness = ref<PlatformReadiness>();
@@ -685,6 +735,46 @@
   const welcomeExamples = ref<string[]>([]);
   const conversations = ref<ProjectConversation[]>([]);
   const activeConversationId = ref<string>();
+  const conversationSearch = ref('');
+  const showAllConversations = ref(false);
+  const conversationPageSize = 12;
+  const uniqueConversations = computed(() => {
+    const seen = new Set<string>();
+    return conversations.value.filter(item => {
+      const key = `${item.title || ''}|${item.updateTime || ''}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  });
+  const filteredConversations = computed(() => {
+    const keyword = conversationSearch.value.trim().toLocaleLowerCase();
+    if (!keyword) return uniqueConversations.value;
+    return uniqueConversations.value.filter(item =>
+      `${item.title || ''} ${item.updateTime || ''}`.toLocaleLowerCase().includes(keyword),
+    );
+  });
+  const visibleConversations = computed(() => {
+    const filtered = filteredConversations.value;
+    if (showAllConversations.value || conversationSearch.value.trim()) return filtered;
+    const recent = filtered.slice(0, conversationPageSize);
+    const active = conversations.value.find(item => item.conversationId === activeConversationId.value);
+    if (active && !recent.some(item => item.conversationId === active.conversationId)) {
+      return [active, ...recent.slice(0, conversationPageSize - 1)];
+    }
+    return recent;
+  });
+  const hasMoreConversations = computed(
+    () => !conversationSearch.value.trim() && filteredConversations.value.length > conversationPageSize,
+  );
+  const conversationCountLabel = computed(() => {
+    if (conversationSearch.value.trim()) return `匹配 ${filteredConversations.value.length} 条`;
+    if (showAllConversations.value) return `共 ${filteredConversations.value.length} 条`;
+    return `最近显示 ${Math.min(filteredConversations.value.length, conversationPageSize)} 条`;
+  });
+  const conversationEmptyLabel = computed(() =>
+    conversationSearch.value.trim() ? '没有匹配的历史查询' : '暂无查询会话',
+  );
   const activeConversation = computed(() =>
     conversations.value.find(item => item.conversationId === activeConversationId.value),
   );
@@ -701,10 +791,7 @@
   const selectedClarificationScope = ref<SemanticBindingScope>('QUERY');
   const clarificationCustomAnswer = ref('');
   const answeringClarification = ref(false);
-  const currentOperatorId = ref('ui-user');
-  const currentOperatorRole = ref<'VIEWER' | 'EDITOR' | 'REVIEWER' | 'PUBLISHER' | 'ADMIN'>(
-    'VIEWER',
-  );
+  const currentOperatorId = ref('local-operator');
   const preferenceActionId = ref<number>();
   const hiddenUpgradePromptIds = ref<Set<number>>(new Set());
   const humanReviewFeedback = ref('');
@@ -724,22 +811,22 @@
     {
       value: 'METRIC',
       label: '业务指标理解错了',
-      description: '例如金额、收入、订单数的业务口径不是你想表达的',
+      description: '当前指标的业务口径不是你想表达的',
     },
     {
       value: 'DIMENSION',
       label: '分组对象理解错了',
-      description: '例如客户、渠道、区域、商品等分组维度不对',
+      description: '当前分组对象或维度不是你想表达的',
     },
     {
       value: 'ENUM_VALUE',
       label: '状态或类型理解错了',
-      description: '例如“成功”“退款”“新客”等业务取值映射不对',
+      description: '当前状态、类型或取值映射不对',
     },
     {
       value: 'TIME',
       label: '时间口径理解错了',
-      description: '例如应该按支付时间而不是下单时间统计',
+      description: '当前时间字段、时间范围或统计粒度不对',
     },
     {
       value: 'DATA_QUALITY',
@@ -814,14 +901,8 @@
   const clarificationAllowsDurableScope = computed(() =>
     ['METRIC', 'DIMENSION', 'ENUM_VALUE'].includes(clarification.value?.assetType || ''),
   );
-  const canSubmitPersonalFeedback = computed(() =>
-    Boolean(selectedProjectAccess.value?.globalAdmin || selectedProjectAccess.value?.accessRole),
-  );
-  const canSubmitProjectRule = computed(
-    () =>
-      ['EDITOR', 'REVIEWER', 'PUBLISHER', 'ADMIN'].includes(currentOperatorRole.value) &&
-      ['EDITOR', 'OWNER'].includes(selectedProjectAccess.value?.accessRole || ''),
-  );
+  const canSubmitPersonalFeedback = computed(() => true);
+  const canSubmitProjectRule = computed(() => true);
   const humanReviewRequired = computed(() => {
     if (
       activeRun.value?.status !== 'WAITING_HUMAN' ||
@@ -1037,19 +1118,19 @@
     projectContextError.value = '';
     selectedProjectHealthError.value = '';
     conversationError.value = '';
+    conversationSearch.value = '';
+    showAllConversations.value = false;
     clearClarification();
     humanReviewFeedback.value = '';
     if (!selectedProjectId.value) return;
     conversationLoading.value = true;
     try {
       const healthPromise = reloadSelectedProjectHealth();
-      [selectedProject.value, selectedProjectAccess.value, versions.value, conversations.value] =
-        await Promise.all([
-          semEvoSQLService.project(selectedProjectId.value),
-          semEvoSQLService.projectAccess(selectedProjectId.value),
-          semEvoSQLService.projectVersions(selectedProjectId.value),
-          semEvoSQLService.projectConversations(selectedProjectId.value),
-        ]);
+      [selectedProject.value, versions.value, conversations.value] = await Promise.all([
+        semEvoSQLService.project(selectedProjectId.value),
+        semEvoSQLService.projectVersions(selectedProjectId.value),
+        semEvoSQLService.projectConversations(selectedProjectId.value),
+      ]);
       await healthPromise;
       await loadWelcomeExamples();
       const restoredConversation = canRestoreCursor(
@@ -1068,15 +1149,28 @@
         );
       }
     } catch (error) {
-      projectContextError.value = error instanceof Error ? error.message : '项目问数上下文加载失败';
+      projectContextError.value = error instanceof Error ? error.message : '查询工作台上下文加载失败';
     } finally {
       conversationLoading.value = false;
     }
   };
 
+  const projectIdFromRoute = (value: unknown) => {
+    const raw = Array.isArray(value) ? value[0] : value;
+    const projectId = Number(raw);
+    return Number.isFinite(projectId) && projectId > 0 ? projectId : undefined;
+  };
+
+  const selectProject = async () => {
+    const query = { ...route.query };
+    if (selectedProjectId.value) query.projectId = String(selectedProjectId.value);
+    else delete query.projectId;
+    await router.replace({ query });
+  };
+
   const createConversation = async () => {
     if (!queryCapabilityReady.value) {
-      ElMessage.warning('模型能力当前不可用，暂时不能创建新的问数会话');
+      ElMessage.warning('模型服务当前不可用，暂时不能创建新的查询会话');
       return;
     }
     if (!selectedProjectId.value || !canCreateConversation.value) return;
@@ -1136,7 +1230,7 @@
 
   const send = async () => {
     if (!queryCapabilityReady.value) {
-      ElMessage.warning('模型能力当前不可用，历史会话仍可查看，但暂时不能发起新查询');
+      ElMessage.warning('模型服务当前不可用，历史会话仍可查看，但暂时不能发起新查询');
       return;
     }
     if (!selectedProjectId.value || !activeConversationId.value || !message.value.trim()) return;
@@ -1213,9 +1307,9 @@
       hiddenUpgradePromptIds.value = new Set([...hiddenUpgradePromptIds.value, preferenceId]);
       ElMessage.success(
         action === 'PROMOTE'
-          ? '已提交为项目规则建议；当前个人选择继续有效，待审核发布后才会影响其他用户'
+          ? '已申请升级为项目统一定义；当前个人习惯继续有效，通过语义验证、回归与发布后才会项目共享'
           : action === 'CONTINUE'
-            ? '已继续记住为你的选择，后续达到下一阈值再提醒'
+            ? '已继续作为你的个人习惯使用，后续稳定使用一段时间后再提醒'
             : '已关闭这条建议的提醒',
       );
     } catch (error) {
@@ -1516,7 +1610,7 @@
           selectedScope === 'USER'
             ? `已记住你把“${rawExpression}”理解为“${option.businessLabel}”。后续你的查询会优先使用这个含义。`
             : selectedScope === 'PROJECT'
-              ? `已按“${option.businessLabel}”重新查询，并提交为项目规则建议；审核发布前不会影响其他用户。`
+              ? `已按“${option.businessLabel}”重新查询，并申请作为项目统一定义；通过语义验证、回归与发布前不会影响其他用户。`
               : `已按“${option.businessLabel}”重新查询。这次修正只对本次查询生效。`,
         );
       } else {
@@ -1542,7 +1636,7 @@
           correctionCategory.value === 'DATA_QUALITY'
             ? '已记录为数据质量问题，这条错误结果不会继续参与学习。'
             : correctionCategory.value === 'PLANNING'
-              ? '已提交规划策略改进建议；必须经过 Planner Replay、审核与发布后才会影响后续规划。'
+              ? '已提交规划策略改进建议；必须经过回归验证、审核与发布后才会影响后续查询规划。'
               : ['DEFINITION', 'TIME', 'FILTER', 'RELATIONSHIP'].includes(correctionCategory.value)
                 ? '已提交业务模型改进建议；验证与回归测试通过前不会修改正式口径。'
                 : '已记录这次纠正，这条错误结果不会继续参与学习。',
@@ -1636,26 +1730,30 @@
           error instanceof Error ? error.message : '平台模型能力状态读取失败';
       });
     try {
-      const [operator, projectList] = await Promise.all([
-        platformContext.operator(),
-        semEvoSQLService.listProjects(),
-      ]);
-      currentOperatorId.value = operator.operator;
-      currentOperatorRole.value = operator.role;
-      projects.value = projectList;
+      projects.value = await semEvoSQLService.listProjects();
       const persisted = readPersistedRunCursor();
-      const queryProjectId = Number(route.query.projectId);
-      selectedProjectId.value =
-        Number.isFinite(queryProjectId) && queryProjectId > 0
-          ? queryProjectId
-          : persisted?.projectId || projects.value[0]?.id;
-      await loadProject(persisted?.projectId === selectedProjectId.value ? persisted : undefined);
+      const queryProjectId = projectIdFromRoute(route.query.projectId);
+      selectedProjectId.value = queryProjectId;
+      await loadProject(
+        queryProjectId && persisted?.projectId === queryProjectId
+          ? persisted
+          : undefined,
+      );
       await readinessPromise;
     } catch (error) {
-      initializationError.value = error instanceof Error ? error.message : '问数页面初始化失败';
+      initializationError.value = error instanceof Error ? error.message : '查询工作台初始化失败';
       await readinessPromise;
     }
   };
+
+  watch(
+    () => route.query.projectId,
+    (value, previousValue) => {
+      if (value === previousValue) return;
+      selectedProjectId.value = projectIdFromRoute(value);
+      void loadProject();
+    },
+  );
 
   onMounted(() => {
     window.addEventListener('online', handleOnline);
@@ -1672,30 +1770,56 @@
 <style scoped>
   .chat-shell {
     display: grid;
-    grid-template-columns: clamp(280px, 20vw, 320px) minmax(0, 1fr);
+    grid-template-columns: clamp(265px, 20vw, 315px) minmax(0, 1fr);
     width: 100%;
-    max-width: 1600px;
-    height: calc(100vh - 64px);
-    margin: 0 auto;
-    background: #f8fafc;
+    height: 100vh;
+    background: #f4f6f8;
   }
   .conversation-sidebar {
     overflow: hidden;
-    padding: 20px;
-    border-right: 1px solid #e2e8f0;
-    background: #fff;
+    padding: 18px 14px;
+    border-right: 1px solid #dfe8e8;
+    background: #f8fafb;
+  }
+  .conversation-tools {
+    display: grid;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .conversation-count {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 24px;
+    color: #63777e;
+    font-size: 11px;
   }
   .sidebar-title {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 18px;
-    font-size: 20px;
+    margin-bottom: 14px;
+    gap: 12px;
+  }
+  .sidebar-title > div {
+    display: grid;
+    gap: 3px;
+  }
+  .sidebar-kicker {
+    color: #2a9d8f;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+  }
+  .sidebar-title strong {
+    color: #17353b;
+    font-size: 16px;
   }
   .conversation-list {
     overflow-y: auto;
     max-height: calc(100vh - 170px);
-    margin-top: 18px;
+    margin-top: 8px;
   }
   .mobile-context-bar {
     display: none;
@@ -1705,57 +1829,134 @@
     flex-direction: column;
     gap: 5px;
     width: 100%;
-    margin-bottom: 6px;
+    margin-bottom: 5px;
     padding: 12px;
     border: 0;
-    border-radius: 10px;
+    border-radius: 9px;
     background: transparent;
-    color: #334155;
+    color: #46636a;
     text-align: left;
     cursor: pointer;
   }
   .conversation span {
-    color: #94a3b8;
+    color: #6f838a;
     font-size: 11px;
   }
   .conversation.active {
-    background: #eff6ff;
-    color: #1d4ed8;
+    border-left: 3px solid #2a9d8f;
+    background: #eaf7f3;
+    color: #177d73;
   }
   .chat-main {
     display: flex;
     overflow: hidden;
     flex-direction: column;
     min-width: 0;
+    background: #f7f9fa;
   }
   .chat-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
     gap: 20px;
-    padding: 18px 28px;
-    border-bottom: 1px solid #e2e8f0;
-    background: #fff;
+    padding: 12px 24px;
+    border-bottom: 1px solid #dfe8e8;
+    background: #fbfdfd;
+  }
+  .focus-brand {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 8px;
+    padding: 0 14px 0 0;
+    border: 0;
+    border-right: 1px solid #dfe8e8;
+    background: transparent;
+    color: #17353b;
+    font-size: 13px;
+    font-weight: 750;
+    cursor: pointer;
+  }
+  .focus-brand-mark {
+    display: grid;
+    width: 28px;
+    height: 28px;
+    place-items: center;
+    border-radius: 9px;
+    background: #dff3ee;
+    color: #177d73;
+    font-size: 13px;
   }
   .chat-header h1 {
-    margin: 0 0 6px;
-    color: #0f172a;
-    font-size: 18px;
+    margin: 0 0 3px;
+    color: #17353b;
+    font-size: 16px;
   }
   .chat-header span {
-    color: #64748b;
+    color: #71858b;
     font-size: 13px;
   }
   .run-actions {
     display: flex;
     align-items: center;
-    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 4px;
   }
   .message-area {
     flex: 1;
     overflow-y: auto;
     width: 100%;
-    padding: 32px max(32px, calc((100% - 900px) / 2));
+    padding: 34px max(24px, calc((100% - 920px) / 2));
+    background:
+      radial-gradient(circle at 12% 4%, rgb(208 242 235 / 34%), transparent 25%),
+      #f7f9fa;
+  }
+  .project-selection-empty {
+    display: grid;
+    max-width: 620px;
+    margin: 15vh auto 0;
+    justify-items: center;
+    gap: 10px;
+    padding: 0 20px 36px;
+    text-align: center;
+  }
+  .selection-icon {
+    display: grid;
+    width: 48px;
+    height: 48px;
+    margin-bottom: 4px;
+    place-items: center;
+    border-radius: 14px;
+    background: #e2f4ef;
+    color: #177d73;
+    font-size: 21px;
+  }
+  .selection-kicker {
+    color: #2a9d8f;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.13em;
+  }
+  .project-selection-empty h2 {
+    margin: 0;
+    color: #17353b;
+    font-size: clamp(24px, 3vw, 34px);
+    letter-spacing: -0.035em;
+  }
+  .project-selection-empty p {
+    max-width: 520px;
+    margin: 0 0 6px;
+    color: #536970;
+    line-height: 1.75;
+  }
+  .selection-control {
+    width: min(360px, 100%);
+    margin-top: 8px;
+  }
+  .project-selection-empty small {
+    color: #63777e;
+    font-size: 11px;
   }
   .page-error-alert,
   .version-notice {
@@ -1782,19 +1983,21 @@
     margin: 0 auto 20px;
   }
   .clarification-card {
-    border-color: #facc15;
+    border-color: #d6c58d;
+    background: #fffdf7;
   }
   .human-review-card {
-    border-color: #fb923c;
+    border-color: #e4b47a;
+    background: #fffaf3;
   }
   .clarification-card h3 {
     margin: 0 0 8px;
-    color: #0f172a;
+    color: #17353b;
   }
   .clarification-reason,
   .human-review-summary {
     margin: 0 0 14px;
-    color: #64748b;
+    color: #71858b;
     line-height: 1.7;
   }
   .clarification-options {
@@ -1841,8 +2044,8 @@
     display: grid;
     gap: 10px;
     padding: 16px 18px;
-    border-top: 1px solid #fecaca;
-    background: #fff7f7;
+    border-top: 1px solid #efc7c2;
+    background: #fff8f7;
   }
   .answer-correction-panel :deep(.el-select),
   .answer-correction-panel :deep(.el-input) {
@@ -1871,17 +2074,17 @@
     display: grid;
     gap: 4px;
     padding: 10px 12px;
-    border: 1px solid #e2e8f0;
+    border: 1px solid #dce7e7;
     border-radius: 10px;
     background: #fff;
-    color: #334155;
+    color: #46636a;
     cursor: pointer;
     text-align: left;
   }
   .correction-kind:hover,
   .correction-kind.active {
-    border-color: #93c5fd;
-    background: #eff6ff;
+    border-color: #9bcfc5;
+    background: #eaf7f3;
   }
   .correction-kind small {
     color: #64748b;
@@ -1911,51 +2114,95 @@
     max-width: 760px;
     margin: 0 auto 18px;
     padding: 16px 18px;
-    border: 1px solid #e2e8f0;
+    border: 1px solid #dce7e7;
     border-radius: 14px;
     background: #fff;
   }
   .message.user {
-    border-color: #bfdbfe;
-    background: #eff6ff;
+    max-width: 650px;
+    border-color: #173f43;
+    background: #173f43;
+    box-shadow: 0 8px 18px rgb(23 63 67 / 12%);
   }
   .message-meta,
   .event-heading {
     display: flex;
     justify-content: space-between;
     gap: 12px;
-    color: #64748b;
+    color: #71858b;
     font-size: 12px;
   }
   .message-content {
     margin-top: 10px;
-    color: #1e293b;
+    color: #213e46;
     white-space: pre-wrap;
     line-height: 1.7;
   }
+  .message.user .message-meta,
+  .message.user .message-content {
+    color: #e8f7f3;
+  }
+  .message.user .message-meta span {
+    color: #a9d0ca;
+  }
   .composer {
-    padding: 18px max(28px, calc((100% - 900px) / 2));
-    border-top: 1px solid #e2e8f0;
+    padding: 12px max(24px, calc((100% - 920px) / 2)) 14px;
+    border-top: 1px solid #dfe8e8;
+    background: #fbfdfd;
+    box-shadow: 0 -8px 20px rgb(22 58 63 / 3%);
+  }
+  .composer-surface {
+    padding: 8px 10px 8px 14px;
+    border: 1px solid #cbdedb;
+    border-radius: 15px;
     background: #fff;
+    box-shadow: 0 6px 18px rgb(22 58 63 / 6%);
+  }
+  .composer-input :deep(.el-textarea__inner) {
+    min-height: 62px !important;
+    padding: 8px 0;
+    border: 0;
+    box-shadow: none !important;
+    background: transparent;
   }
   .composer-footer {
     display: flex;
     justify-content: space-between;
     align-items: center;
     gap: 16px;
-    margin-top: 10px;
-    color: #94a3b8;
+    margin-top: 5px;
+    color: #63777e;
     font-size: 12px;
   }
   .composer-options {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 8px 12px;
+    gap: 8px 10px;
     min-width: 0;
   }
   .composer-options small {
-    color: #64748b;
+    color: #536970;
+  }
+  .approval-select {
+    width: 132px;
+  }
+  .composer-note {
+    margin: 7px 2px 0;
+    color: #63777e;
+    font-size: 11px;
+    text-align: center;
+  }
+  .composer :deep(.el-textarea__inner) {
+    min-height: 78px !important;
+    padding: 14px 16px;
+    border-radius: 12px;
+    background: #fff;
+    color: #213e46;
+    line-height: 1.65;
+  }
+  .composer :deep(.el-textarea__inner::placeholder) {
+    color: #9aa9ad;
   }
   @media (max-width: 850px) {
     .chat-shell {
@@ -1969,12 +2216,18 @@
       grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
       gap: 8px;
       padding: 10px 14px;
-      border-bottom: 1px solid #e2e8f0;
-      background: #fff;
+      border-bottom: 1px solid #dfe8e8;
+      background: #fbfdfd;
     }
     .chat-header {
       align-items: flex-start;
       flex-direction: column;
+      gap: 10px;
+      padding: 12px 16px;
+    }
+    .focus-brand {
+      border-right: 0;
+      padding-right: 0;
     }
     .run-actions {
       flex-wrap: wrap;
@@ -1983,6 +2236,19 @@
     .composer {
       padding-right: 16px;
       padding-left: 16px;
+    }
+    .composer-surface {
+      padding-left: 12px;
+    }
+    .composer-footer {
+      align-items: stretch;
+      flex-direction: column;
+    }
+    .composer-options {
+      justify-content: space-between;
+    }
+    .composer-footer > .el-button {
+      width: 100%;
     }
     .page-error-alert,
     .version-notice {

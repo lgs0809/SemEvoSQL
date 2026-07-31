@@ -10,7 +10,7 @@
         <p>优化建议先经过影子验证；至少 5 个样本、质量不下降且综合成本下降 30% 后才能人工启用。</p>
       </div>
       <div class="filters">
-        <el-select v-model="status" @change="load">
+        <el-select v-model="status" placeholder="筛选状态" clearable @change="load">
           <el-option label="全部状态" value="" />
           <el-option
             v-for="item in statuses"
@@ -110,9 +110,11 @@
     <el-drawer v-model="drawerVisible" title="运行优化门禁" size="68%">
       <template v-if="selected">
         <el-descriptions :column="2" border>
-          <el-descriptions-item label="类型">{{ selected.optimization_type }}</el-descriptions-item>
-          <el-descriptions-item label="状态">{{ selected.status }}</el-descriptions-item>
-          <el-descriptions-item label="Gate">
+          <el-descriptions-item label="类型">
+            {{ optimizationTitle(selected.optimization_type) }}
+          </el-descriptions-item>
+          <el-descriptions-item label="状态">{{ statusLabel(selected.status) }}</el-descriptions-item>
+          <el-descriptions-item label="门禁状态">
             <el-tag :type="selected.gatePassed ? 'success' : 'danger'">
               {{ selected.gatePassed ? '通过' : '未通过' }}
             </el-tag>
@@ -133,7 +135,7 @@
         <pre>{{ pretty(selected.proposal_json) }}</pre>
         <h3>基线指标</h3>
         <pre>{{ pretty(selected.baseline_metrics_json) }}</pre>
-        <h3>Shadow 指标</h3>
+        <h3>影子验证指标</h3>
         <pre>{{ pretty(selected.shadow_metrics_json) }}</pre>
       </template>
     </el-drawer>
@@ -196,8 +198,8 @@
   const shadow = async (candidate: RuntimeOptimizationCandidate) => {
     try {
       const response = await ElMessageBox.prompt(
-        '输入 Shadow 指标 JSON。必须包含 sampleCount、正确性/安全性等质量指标和成本指标。',
-        '记录 Shadow',
+        '请输入影子验证指标 JSON。必须包含样本数、正确性/安全性等质量指标和成本指标。',
+        '记录影子验证',
         {
           inputType: 'textarea',
           inputValue: JSON.stringify(
@@ -227,7 +229,7 @@
         },
       );
       await semEvoSQLService.recordOptimizationShadow(candidate.id, JSON.parse(response.value));
-      ElMessage.success('Shadow 指标已记录并重新执行门禁');
+      ElMessage.success('影子验证指标已记录，已重新执行门禁');
       await load();
     } catch (error) {
       if (error instanceof Error) ElMessage.error(error.message);
@@ -238,7 +240,7 @@
       await ElMessageBox.confirm('批准前端操作不会绕过后端 Shadow Gate。', '批准运行优化', {
         type: 'warning',
       });
-      await semEvoSQLService.approveRuntimeOptimization(candidate.id, 'Shadow gate reviewed');
+      await semEvoSQLService.approveRuntimeOptimization(candidate.id, '已完成影子验证门禁复核');
       ElMessage.success('候选已批准');
       await load();
     } catch (error) {

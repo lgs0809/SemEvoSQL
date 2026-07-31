@@ -15,6 +15,7 @@
  */
 package cn.lgs.semevosql.learning;
 
+import cn.lgs.semevosql.run.RunExecutionFenceService;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashSet;
 import java.util.Locale;
@@ -22,6 +23,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -34,15 +36,36 @@ public class QueryCaseUsageService {
 
 	private final QueryCaseQuarantineService quarantineService;
 
-	public QueryCaseUsageService(JdbcTemplate jdbc, QueryCaseQuarantineService quarantineService) {
+	private final RunExecutionFenceService executionFence;
+
+	@Autowired
+	public QueryCaseUsageService(JdbcTemplate jdbc, QueryCaseQuarantineService quarantineService,
+			RunExecutionFenceService executionFence) {
 		this.jdbc = jdbc;
 		this.quarantineService = quarantineService;
+		this.executionFence = executionFence;
+	}
+
+	/** Lightweight constructor retained for focused tests and compatibility callers. */
+	public QueryCaseUsageService(JdbcTemplate jdbc, QueryCaseQuarantineService quarantineService) {
+		this(jdbc, quarantineService, null);
 	}
 
 	@Transactional
 	public void recordHintUsage(String runId, QueryCaseHints hints) {
+		recordHintUsage(runId, null, hints);
+	}
+
+	@Transactional
+	public void recordHintUsage(String runId, String attemptId, QueryCaseHints hints) {
 		if (!StringUtils.hasText(runId) || hints == null || hints.sourceExampleIds().isEmpty()) {
 			return;
+		}
+		if (StringUtils.hasText(attemptId)) {
+			if (executionFence == null) {
+				throw new IllegalStateException("Run execution fence is required for attempt-scoped query case usage");
+			}
+			executionFence.assertActiveAndLock(runId, attemptId);
 		}
 		for (String caseId : new LinkedHashSet<>(hints.sourceExampleIds())) {
 			String id = UUID
@@ -65,7 +88,7 @@ public class QueryCaseUsageService {
 		}
 		boolean failed = "FAILED".equalsIgnoreCase(outcome);
 		for (Map<String, Object> usage : jdbc.queryForList("""
-				SELECT u.*, r.error_code AS run_error_code
+				SELECT u.*, r.error_code AS run_error_code, r.attempt_id AS run_attempt_id
 				FROM qw_query_case_usage u
 				JOIN qw_query_run r ON r.run_id = u.run_id
 				WHERE r.episode_id = ?
@@ -73,6 +96,10 @@ public class QueryCaseUsageService {
 			String usageId = Objects.toString(usage.get("id"));
 			String queryCaseId = Objects.toString(usage.get("query_example_id"));
 			String runId = Objects.toString(usage.get("run_id"));
+			String attemptId = Objects.toString(usage.get("run_attempt_id"), "");
+			if (executionFence != null && StringUtils.hasText(runId) && StringUtils.hasText(attemptId)) {
+				executionFence.assertFinalizerOwnsRunAndLock(runId, attemptId);
+			}
 			String errorCode = Objects.toString(usage.get("run_error_code"), "");
 			boolean attributableFailure = failed && failureAttributableToQueryCase(runId, errorCode);
 			boolean issue = failed ? attributableFailure : hasClarificationOrRepair(runId);
@@ -114,10 +141,15 @@ public class QueryCaseUsageService {
 			return;
 		}
 		for (Map<String, Object> usage : jdbc.queryForList("""
-				SELECT u.* FROM qw_query_case_usage u
+				SELECT u.*, r.run_id, r.attempt_id AS run_attempt_id FROM qw_query_case_usage u
 				JOIN qw_query_run r ON r.run_id = u.run_id
 				WHERE r.episode_id = ?
 				""", episodeId)) {
+			String runId = Objects.toString(usage.get("run_id"), "");
+			String attemptId = Objects.toString(usage.get("run_attempt_id"), "");
+			if (executionFence != null && StringUtils.hasText(runId) && StringUtils.hasText(attemptId)) {
+				executionFence.assertFinalizerOwnsRunAndLock(runId, attemptId);
+			}
 			int changed = jdbc.update("""
 					UPDATE qw_query_case_usage SET adopted = TRUE, update_time = CURRENT_TIMESTAMP
 					WHERE id = ? AND adopted = FALSE

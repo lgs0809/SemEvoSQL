@@ -146,8 +146,10 @@ public class TableRelationNode implements NodeAction {
 	private Flux<ChatResponse> processSchemaSelection(SchemaDTO schema, String input, String evidence,
 			OverAllState state, DbConfigBO dbConfig, Consumer<SchemaDTO> resultConsumer) {
 		String schemaAdvice = StateUtil.getStringValue(state, SQL_GENERATE_SCHEMA_MISSING_ADVICE, null);
+		Long deadlineEpochMillis = StateUtil.getObjectValue(state,
+				cn.lgs.semevosql.constant.Constant.RUN_DEADLINE_EPOCH_MILLIS, Long.class, (Long) null);
 		Flux<ChatResponse> schemaFlux = nl2SqlService.fineSelect(schema, input, evidence, schemaAdvice, dbConfig,
-				resultConsumer);
+				resultConsumer, deadlineEpochMillis);
 		return Flux
 			.just(ChatResponseUtil.createResponse("正在选择合适的数据表...\n"),
 					ChatResponseUtil.createPureResponse(TextType.JSON.getStartSign()))

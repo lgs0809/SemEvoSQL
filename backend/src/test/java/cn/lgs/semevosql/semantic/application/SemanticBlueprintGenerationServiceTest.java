@@ -16,9 +16,13 @@
 package cn.lgs.semevosql.semantic.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import cn.lgs.semevosql.learning.QueryCaseHints;
 import cn.lgs.semevosql.multisource.MultiSourcePolicySnapshot.CrossSourceRelationship;
+import cn.lgs.semevosql.semantic.domain.ComputationIntent;
+import cn.lgs.semevosql.semantic.domain.ComputationIntent.Capability;
+import cn.lgs.semevosql.util.JsonUtil;
 import cn.lgs.semevosql.semantic.domain.RelationshipCardinality;
 import cn.lgs.semevosql.semantic.domain.SemanticAssetStatus;
 import cn.lgs.semevosql.semantic.domain.SemanticCandidateSet;
@@ -34,8 +38,8 @@ class SemanticBlueprintGenerationServiceTest {
 	void genericTemporalGroupingWithMultipleGovernedTimeAxesRequiresClarification() {
 		SemanticCandidateSet candidates = candidates(time("created_at", "created_at"), time("paid_at", "paid_at"));
 
-		SemanticPlanningOutcome outcome = SemanticBlueprintGenerationService.unresolvedGenericTimeAxis("按时间统计订单数量。",
-				candidates, QueryCaseHints.empty());
+		SemanticPlanningOutcome outcome = SemanticBlueprintGenerationService.unresolvedTimeAxis(candidates,
+				QueryCaseHints.empty(), new ComputationIntent(Set.of(Capability.TIME_BUCKET)));
 
 		assertThat(outcome).isInstanceOf(SemanticPlanningOutcome.ClarificationRequired.class);
 		SemanticPlanningOutcome.ClarificationRequired clarification = (SemanticPlanningOutcome.ClarificationRequired) outcome;
@@ -49,8 +53,8 @@ class SemanticBlueprintGenerationServiceTest {
 		QueryCaseHints binding = new QueryCaseHints(Set.of("orders"), Set.of("order_count"), Set.of("paid_at"), Set.of(),
 				Set.of(), Set.of(), List.of(), "CURRENT_QUERY", List.of(), 1.0d, Map.of());
 
-		SemanticPlanningOutcome outcome = SemanticBlueprintGenerationService.unresolvedGenericTimeAxis("按时间统计订单数量。",
-				candidates, binding);
+		SemanticPlanningOutcome outcome = SemanticBlueprintGenerationService.unresolvedTimeAxis(candidates, binding,
+				new ComputationIntent(Set.of(Capability.TIME_BUCKET)));
 
 		assertThat(outcome).isInstanceOf(SemanticPlanningOutcome.ClarificationRequired.class);
 	}
@@ -58,11 +62,98 @@ class SemanticBlueprintGenerationServiceTest {
 	@Test
 	void explicitBusinessTimeAxisDoesNotTriggerGenericFallback() {
 		SemanticCandidateSet candidates = candidates(time("created_at", "created_at"), time("paid_at", "paid_at"));
+		QueryCaseHints binding = new QueryCaseHints(Set.of("orders"), Set.of(), Set.of("paid_at"), Set.of(), Set.of(),
+				Set.of(), List.of(), new QueryCaseHints.TimeBindingHint("paid_at", "orders", "paid_at", "QUERY", 1.0d),
+				true, "CURRENT_QUERY", List.of(), 1.0d, Map.of());
 
-		SemanticPlanningOutcome outcome = SemanticBlueprintGenerationService.unresolvedGenericTimeAxis("按 paid_at 日期统计订单数量。",
-				candidates, QueryCaseHints.empty());
+		SemanticPlanningOutcome outcome = SemanticBlueprintGenerationService.unresolvedTimeAxis(candidates, binding,
+				new ComputationIntent(Set.of(Capability.TIME_BUCKET)));
 
 		assertThat(outcome).isNull();
+	}
+
+	@Test
+	void scalarCompositionAcceptsPlannerDeclaredGovernedMetricCalculation() {
+		QueryCaseHints.ResultCompositionHint composition = SemanticBlueprintGenerationService.validateResultComposition("SCALAR",
+				"difference = ABS(order_count - golden_order_count)", Set.of("order_count", "golden_order_count"));
+
+		assertThat(composition.type()).isEqualTo("SCALAR");
+		assertThat(composition.calculationExpression()).isEqualTo("difference=ABS(order_count-golden_order_count)");
+	}
+
+	@Test
+	void scalarCompositionRejectsMetricsThatWereNotSelectedByPlanner() {
+		assertThatThrownBy(() -> SemanticBlueprintGenerationService.validateResultComposition("SCALAR",
+				"difference=order_count-unknown_metric", Set.of("order_count", "golden_order_count")))
+			.isInstanceOf(IllegalArgumentException.class)
+			.hasMessageContaining("only selected metric codes");
+	}
+
+	@Test
+	void scalarCompositionRejectsArbitraryFunctionsAndOperators() {
+		assertThatThrownBy(() -> SemanticBlueprintGenerationService.validateResultComposition("SCALAR",
+				"ratio=order_count/golden_order_count", Set.of("order_count", "golden_order_count")))
+			.isInstanceOf(IllegalArgumentException.class)
+			.hasMessageContaining("only one binary + or - expression");
+	}
+
+	@Test
+	void computationRequirementsPreserveTopNAndPeriodComparisonSemanticsWithoutSqlStructure() throws Exception {
+		var mapper = JsonUtil.getObjectMapper();
+		ComputationIntent intent = SemanticBlueprintGenerationService.computationIntent(
+				mapper.readTree("[\"AGGREGATION\",\"PERIOD_COMPARISON\",\"ORDERING\",\"LIMIT\"]"),
+				mapper.readTree("""
+						[
+						  {"capability":"PERIOD_COMPARISON","metricCode":"paid_amount","grain":"month","mode":"previous_period_rate"},
+						  {"capability":"ORDERING","mode":"highest","basis":"period_comparison"},
+						  {"capability":"LIMIT","limit":3,"scope":"global","basis":"ordering"}
+						]
+						"""), Set.of("paid_amount"));
+
+		assertThat(intent.capabilities()).contains(Capability.AGGREGATION, Capability.PERIOD_COMPARISON, Capability.ORDERING,
+				Capability.LIMIT);
+		assertThat(intent.requirements()).hasSize(3);
+		assertThat(intent.requirements().get(0).grain()).isEqualTo("MONTH");
+		assertThat(intent.requirements().get(0).mode()).isEqualTo("PREVIOUS_PERIOD_RATE");
+		assertThat(intent.requirements().get(1).mode()).isEqualTo("HIGHEST");
+		assertThat(intent.requirements().get(1).basis()).isEqualTo("PERIOD_COMPARISON");
+		assertThat(intent.requirements().get(2).limit()).isEqualTo(3);
+		assertThat(intent.requirements().get(2).basis()).isEqualTo("ORDERING");
+	}
+
+	@Test
+	void computationIntentRemainsBackwardCompatibleWithCapabilityOnlySnapshots() throws Exception {
+		ComputationIntent restored = JsonUtil.getObjectMapper()
+			.readValue("{\"capabilities\":[\"AGGREGATION\"]}", ComputationIntent.class);
+
+		assertThat(restored.capabilities()).containsExactly(Capability.AGGREGATION);
+		assertThat(restored.requirements()).isEmpty();
+	}
+
+	@Test
+	void computationRequirementRejectsMetricOutsideCurrentSemanticSelection() throws Exception {
+		var mapper = JsonUtil.getObjectMapper();
+		assertThatThrownBy(() -> SemanticBlueprintGenerationService.computationIntent(mapper.readTree("[]"),
+				mapper.readTree("[{\"capability\":\"PERIOD_COMPARISON\",\"metricCode\":\"refund_amount\"}]"),
+				Set.of("paid_amount"))).isInstanceOf(IllegalArgumentException.class)
+				.hasMessageContaining("metricCode must be selected");
+	}
+
+	@Test
+	void computationRequirementRejectsInvalidLimitAndSqlLikeSemanticTokens() throws Exception {
+		var mapper = JsonUtil.getObjectMapper();
+		assertThatThrownBy(() -> SemanticBlueprintGenerationService.computationIntent(mapper.readTree("[]"),
+				mapper.readTree("[{\"capability\":\"LIMIT\",\"limit\":0}]"), Set.of("paid_amount")))
+				.isInstanceOf(IllegalArgumentException.class)
+				.hasMessageContaining("between 1 and 10000");
+		assertThatThrownBy(() -> SemanticBlueprintGenerationService.computationIntent(mapper.readTree("[]"),
+				mapper.readTree("[{\"capability\":\"LIMIT\",\"limit\":3.5}]"), Set.of("paid_amount")))
+				.isInstanceOf(IllegalArgumentException.class)
+				.hasMessageContaining("must be an integer");
+		assertThatThrownBy(() -> SemanticBlueprintGenerationService.computationIntent(mapper.readTree("[]"),
+				mapper.readTree("[{\"capability\":\"PERIOD_COMPARISON\",\"mode\":\"LAG(paid_amount) OVER\"}]"),
+				Set.of("paid_amount"))).isInstanceOf(IllegalArgumentException.class)
+				.hasMessageContaining("must be a semantic token");
 	}
 
 	@Test

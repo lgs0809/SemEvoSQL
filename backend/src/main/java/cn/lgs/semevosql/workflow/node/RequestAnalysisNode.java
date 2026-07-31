@@ -24,9 +24,13 @@ import static cn.lgs.semevosql.constant.Constant.ORIGINAL_REQUEST;
 import static cn.lgs.semevosql.constant.Constant.REQUEST_ANALYSIS;
 import static cn.lgs.semevosql.constant.Constant.RESULT;
 import static cn.lgs.semevosql.constant.Constant.RUN_ID;
+import static cn.lgs.semevosql.constant.Constant.ATTEMPT_ID;
 import static cn.lgs.semevosql.constant.Constant.TODO_ENABLED;
 
 import cn.lgs.semevosql.run.QueryRunService;
+import cn.lgs.semevosql.run.LateRunResultDroppedException;
+import cn.lgs.semevosql.run.RunDeadlineExceededException;
+import cn.lgs.semevosql.run.RunExecutionFenceService;
 import cn.lgs.semevosql.task.QueryDecompositionService;
 import cn.lgs.semevosql.task.QueryDecompositionService.RequestAnalysis;
 import cn.lgs.semevosql.task.QueryDecompositionService.RequestType;
@@ -58,6 +62,8 @@ public class RequestAnalysisNode implements NodeAction {
 
 	private final QueryRunService runService;
 
+	private final RunExecutionFenceService executionFence;
+
 	@Override
 	public Map<String, Object> apply(OverAllState state) {
 		String original = StateUtil.getStringValue(state, INPUT_KEY, "");
@@ -65,13 +71,17 @@ public class RequestAnalysisNode implements NodeAction {
 			throw new IllegalArgumentException("Request analysis requires the original query");
 		}
 		String runId = StateUtil.getStringValue(state, RUN_ID, null);
+		String attemptId = StateUtil.getStringValue(state, ATTEMPT_ID, null);
+		if (StringUtils.hasText(runId) && StringUtils.hasText(attemptId)) {
+			executionFence.assertActive(runId, attemptId);
+		}
 		RequestAnalysis analysis = loadPersisted(runId);
 		if (analysis == null) {
 			// Internal source SQL generation and exact approved-plan recovery both represent one already-governed query
 			// contract and must not pay another request-decomposition model call.
 			analysis = state.value(SQL_GENERATION_ONLY, false) || state.value(APPROVED_PLAN_RECOVERY, false)
 					? RequestAnalysis.simpleDataQuery() : queryDecompositionService.analyze(original);
-			persist(runId, analysis);
+			persist(runId, attemptId, analysis);
 		}
 
 		Map<String, Object> result = new HashMap<>();
@@ -81,6 +91,7 @@ public class RequestAnalysisNode implements NodeAction {
 
 		String activeQuery = original;
 		if (analysis.needsTodo()) {
+			assertActiveIfBound(runId, attemptId);
 			if (!taskRepository.enabled(runId)) {
 				taskRepository.initialize(runId, analysis.tasks());
 			}
@@ -88,10 +99,12 @@ public class RequestAnalysisNode implements NodeAction {
 				result.put(ACTIVE_TODO_ID, "");
 			}
 			else {
+				assertActiveIfBound(runId, attemptId);
 				QueryTask active = taskRepository.activateFirst(runId);
 				result.put(ACTIVE_TODO_ID, active.taskId());
 				activeQuery = active.question();
-				persistTodoActivation(runId, active);
+				assertActiveIfBound(runId, attemptId);
+				persistTodoActivation(runId, attemptId, active);
 			}
 		}
 		else {
@@ -108,7 +121,7 @@ public class RequestAnalysisNode implements NodeAction {
 		return result;
 	}
 
-	private void persistTodoActivation(String runId, QueryTask task) {
+	private void persistTodoActivation(String runId, String attemptId, QueryTask task) {
 		if (!StringUtils.hasText(runId) || task == null) {
 			return;
 		}
@@ -119,11 +132,20 @@ public class RequestAnalysisNode implements NodeAction {
 		try {
 			String payload = JsonUtil.getObjectMapper().writeValueAsString(
 					Map.of("taskId", task.taskId(), "ordinal", task.ordinal(), "question", task.question()));
-			runService.appendEvent(runId, "TODO_ACTIVATED", "request-analysis", payload,
+			runService.appendEvent(runId, attemptId, "TODO_ACTIVATED", "request-analysis", payload,
 					"Query Todo active for request execution", idempotencyKey);
 		}
 		catch (Exception ex) {
+			if (ex instanceof LateRunResultDroppedException || ex instanceof RunDeadlineExceededException) {
+				throw (RuntimeException) ex;
+			}
 			throw new IllegalStateException("Unable to persist active Todo", ex);
+		}
+	}
+
+	private void assertActiveIfBound(String runId, String attemptId) {
+		if (StringUtils.hasText(runId) && StringUtils.hasText(attemptId)) {
+			executionFence.assertActive(runId, attemptId);
 		}
 	}
 
@@ -144,17 +166,20 @@ public class RequestAnalysisNode implements NodeAction {
 		}
 	}
 
-	private void persist(String runId, RequestAnalysis analysis) {
+	private void persist(String runId, String attemptId, RequestAnalysis analysis) {
 		if (!StringUtils.hasText(runId)) {
 			return;
 		}
 		try {
 			String payload = JsonUtil.getObjectMapper().writeValueAsString(analysis);
-			runService.appendEvent(runId, "REQUEST_ANALYSIS_COMPLETED", "request-analysis", payload,
+				runService.appendEvent(runId, attemptId, "REQUEST_ANALYSIS_COMPLETED", "request-analysis", payload,
 					analysis.needsTodo() ? "Multiple independent answer goals detected" : "Simple request fast path selected",
 					"request-analysis:" + runId);
 		}
 		catch (Exception ex) {
+			if (ex instanceof LateRunResultDroppedException || ex instanceof RunDeadlineExceededException) {
+				throw (RuntimeException) ex;
+			}
 			throw new IllegalStateException("Unable to persist request analysis", ex);
 		}
 	}

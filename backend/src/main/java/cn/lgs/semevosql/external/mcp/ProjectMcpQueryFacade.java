@@ -39,6 +39,7 @@ import cn.lgs.semevosql.project.domain.SemanticProject;
 import cn.lgs.semevosql.project.domain.SemanticProjectRepository;
 import cn.lgs.semevosql.run.ExecutionSnapshotService;
 import cn.lgs.semevosql.run.QueryRun;
+import cn.lgs.semevosql.run.QueryRunErrorPresenter;
 import cn.lgs.semevosql.run.QueryRun.RunStatus;
 import cn.lgs.semevosql.run.QueryRun.RunType;
 import cn.lgs.semevosql.run.QueryRunService;
@@ -81,6 +82,8 @@ public class ProjectMcpQueryFacade {
     private final RuntimeClarificationService clarificationService;
 
     private final QueryRunService runService;
+
+    private final QueryRunErrorPresenter runErrorPresenter;
 
     private final SemEvoSQLProductionService productionService;
 
@@ -146,7 +149,7 @@ public class ProjectMcpQueryFacade {
     }
 
     /** Durable polling fallback for clients without MCP Tasks support. */
-    @Transactional(readOnly = true)
+    @Transactional
     public McpQueryResult status(ProjectMcpDeployment deployment, String episodeId) {
         Objects.requireNonNull(deployment, "MCP deployment is required");
         EpisodeSnapshot episode = requireEpisode(deployment, required(episodeId, "episodeId"));
@@ -162,7 +165,7 @@ public class ProjectMcpQueryFacade {
         }
         ResultArtifact artifact = multiSourceRunService.mergedArtifact(run.runId()).orElse(null);
         Object result = artifact == null ? null : parseJsonObject(artifact.dataJson());
-        String answer = assistantAnswer(run.runId());
+        String answer = resolvedAnswer(deployment, episode, run);
         String sql = executedSql(run.runId());
         String mappedStatus = switch (run.status()) {
             case SUCCEEDED -> "COMPLETED";
@@ -175,7 +178,7 @@ public class ProjectMcpQueryFacade {
         };
         return new McpQueryResult(episode.episodeId(), mappedStatus, version.versionNumber(), version.corpusRevision(),
                 answer, sql, evidence(run.runId()), result, run.runId(), run.attemptId(), null,
-                run.errorMessage());
+                errorOutput(run.errorCode(), run.errorMessage()));
     }
 
     private Submission createEpisode(ProjectMcpDeployment deployment, String parentEpisodeId, String input,
@@ -253,7 +256,10 @@ public class ProjectMcpQueryFacade {
         }
         if (!StringUtils.hasText(handle.episodeId())) {
             return new McpQueryResult(null, "RUNNING", null, null, null, null, List.of(), null, handle.runId(), null,
-                    null, handle.lastError());
+                    null, StringUtils.hasText(handle.lastError())
+                            ? new ErrorOutput("QUERY_EXECUTION_FAILED",
+                                    "Query submission failed before durable execution started.", true)
+                            : null);
         }
         return status(deployment, handle.episodeId());
     }
@@ -306,6 +312,15 @@ public class ProjectMcpQueryFacade {
             }
         }
         throw new IllegalArgumentException("Input does not match any clarification option");
+    }
+
+    String resolvedAnswer(ProjectMcpDeployment deployment, EpisodeSnapshot episode, QueryRun run) {
+        if (run.terminal() && StringUtils.hasText(episode.conversationId())) {
+            return conversationService
+                .synchronizeAssistantMessage(deployment.projectId(), episode.conversationId(), run.runId())
+                .content();
+        }
+        return assistantAnswer(run.runId());
     }
 
     private String assistantAnswer(String runId) {
@@ -410,6 +425,14 @@ public class ProjectMcpQueryFacade {
         return value.trim();
     }
 
+    private ErrorOutput errorOutput(String code, String message) {
+        if (!StringUtils.hasText(code) && !StringUtils.hasText(message)) {
+            return null;
+        }
+        QueryRunErrorPresenter.ErrorPresentation presented = runErrorPresenter.present(code);
+        return new ErrorOutput(presented.code(), presented.message(), presented.retryable());
+    }
+
     private Long nullableLong(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
         long value = rs.getLong(column);
         return rs.wasNull() ? null : value;
@@ -430,8 +453,11 @@ public class ProjectMcpQueryFacade {
     public record ClarificationOutput(String id, String question, List<ClarificationOption> options) {
     }
 
+    public record ErrorOutput(String code, String message, boolean retryable) {
+    }
+
     public record McpQueryResult(String episodeId, String status, String semanticVersion, Long corpusRevision,
             String answer, String sql, List<Map<String, Object>> evidence, Object result, String runId, String attemptId,
-            ClarificationOutput clarification, String error) {
+            ClarificationOutput clarification, ErrorOutput error) {
     }
 }

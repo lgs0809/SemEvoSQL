@@ -15,9 +15,8 @@
  */
 package cn.lgs.semevosql.optimization;
 
-import cn.lgs.semevosql.common.OperatorAuthorizationService;
+import cn.lgs.semevosql.common.LocalOperatorService;
 import cn.lgs.semevosql.common.OperatorContext;
-import cn.lgs.semevosql.common.OperatorRole;
 import cn.lgs.semevosql.util.JsonUtil;
 import com.fasterxml.jackson.core.type.TypeReference;
 import java.util.LinkedHashMap;
@@ -48,7 +47,7 @@ public class RuntimeOptimizationService {
 
 	private final JdbcTemplate jdbc;
 
-	private final OperatorAuthorizationService authorization;
+	private final LocalOperatorService authorization;
 
 	public List<Map<String, Object>> list(Long projectId, String status, int limit) {
 		if (StringUtils.hasText(status)) {
@@ -111,7 +110,7 @@ public class RuntimeOptimizationService {
 
 	@Transactional
 	public Map<String, Object> approve(String candidateId, ReviewCommand command, OperatorContext operator) {
-		authorization.requireAtLeast(operator, OperatorRole.REVIEWER, "approve Runtime Optimization");
+		authorization.require(operator, "approve Runtime Optimization");
 		Map<String, Object> current = lockCandidate(candidateId);
 		if (!"SHADOW".equals(text(current.get("status")))) {
 			throw new IllegalStateException("Runtime optimization candidate must complete SHADOW before approval");
@@ -137,7 +136,7 @@ public class RuntimeOptimizationService {
 
 	@Transactional
 	public Map<String, Object> reject(String candidateId, ReviewCommand command, OperatorContext operator) {
-		authorization.requireAtLeast(operator, OperatorRole.REVIEWER, "reject Runtime Optimization");
+		authorization.require(operator, "reject Runtime Optimization");
 		Map<String, Object> current = lockCandidate(candidateId);
 		if (!List.of("CANDIDATE", "SHADOW").contains(text(current.get("status")))) {
 			throw new IllegalStateException("Only CANDIDATE or SHADOW runtime optimizations can be rejected");
@@ -157,7 +156,7 @@ public class RuntimeOptimizationService {
 
 	@Transactional
 	public Map<String, Object> enable(String candidateId, OperatorContext operator) {
-		authorization.requireAtLeast(operator, OperatorRole.PUBLISHER, "enable Runtime Optimization");
+		authorization.require(operator, "enable Runtime Optimization");
 		Map<String, Object> current = lockCandidate(candidateId);
 		if ("ENABLED".equals(text(current.get("status")))) {
 			return get(candidateId);
@@ -203,7 +202,7 @@ public class RuntimeOptimizationService {
 
 	@Transactional
 	public Map<String, Object> disable(String candidateId, String reason, boolean degraded, OperatorContext operator) {
-		authorization.requireAtLeast(operator, OperatorRole.PUBLISHER, "disable Runtime Optimization");
+		authorization.require(operator, "disable Runtime Optimization");
 		Map<String, Object> current = lockCandidate(candidateId);
 		if (!List.of("ENABLED", "APPROVED", "SHADOW").contains(text(current.get("status")))) {
 			return get(candidateId);

@@ -26,6 +26,8 @@ import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 /** Best-effort cumulative compaction of older completed turns. */
 @Slf4j
@@ -64,7 +66,14 @@ public class ConversationContextCompactionService {
 		this.canonicalJson = canonicalJson;
 	}
 
-	public void maybeCompact(String threadId) {
+	public void maybeCompactAsync(String threadId) {
+		if (!properties.isCompressionEnabled() || threadId == null || threadId.isBlank()) {
+			return;
+		}
+		Mono.fromRunnable(() -> maybeCompact(threadId)).subscribeOn(Schedulers.boundedElastic()).subscribe();
+	}
+
+	void maybeCompact(String threadId) {
 		if (!properties.isCompressionEnabled() || threadId == null || threadId.isBlank()) {
 			return;
 		}

@@ -10,11 +10,16 @@
         <p>业务资料只参与业务模型建设和来源审计，不会直接作为问答上下文拼接。</p>
       </div>
       <div class="toolbar-actions">
-        <el-select v-model="selectedVersionId" class="version-select" @change="loadDocuments">
+        <el-select
+          v-model="selectedVersionId"
+          class="version-select"
+          placeholder="选择版本"
+          @change="loadDocuments"
+        >
           <el-option
             v-for="version in versions"
             :key="version.id"
-            :label="`${version.versionNumber} · ${version.status}`"
+            :label="`${version.versionNumber} · ${versionStatusLabel(version.status)}`"
             :value="version.id"
           />
         </el-select>
@@ -59,7 +64,7 @@
             {{ documentStatusLabel(scope.row.status) }}
           </el-tag>
           <div class="subtle">
-            {{ scope.row.materialType }} · {{ formatBytes(scope.row.fileSize) }}
+            {{ materialTypeLabel(scope.row.materialType) }} · {{ formatBytes(scope.row.fileSize) }}
           </div>
         </template>
       </el-table-column>
@@ -136,7 +141,7 @@
         <el-form-item label="来源位置">
           <el-input
             v-model="uploadForm.sourceLocation"
-            placeholder="例如：指标口径文档 / 第 3 章；可稍后由抽取器细化"
+            placeholder="填写资料所在章节、页码或表格位置，可稍后细化"
           />
         </el-form-item>
         <el-form-item label="文件" required>
@@ -245,12 +250,14 @@
         :data="provenance"
         empty-text="该文档尚未产生结构化语义资产"
       >
-        <el-table-column prop="assetType" label="资产类型" width="130" />
+        <el-table-column label="资产类型" width="130">
+          <template #default="scope">{{ semanticAssetTypeLabel(scope.row.assetType) }}</template>
+        </el-table-column>
         <el-table-column prop="assetKey" label="资产 Key" min-width="170" />
         <el-table-column label="处置" width="110">
           <template #default="scope">
             <el-tag :type="scope.row.disposition === 'APPLIED' ? 'success' : 'danger'">
-              {{ scope.row.disposition }}
+              {{ dispositionLabel(scope.row.disposition) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -284,6 +291,7 @@
     type ProjectDocumentType,
     type SemanticProjectVersion,
   } from '@/services/semevosql';
+  import { versionStatusLabel } from '@/services/displayLabels';
 
   const props = defineProps<{
     projectId: number;
@@ -297,7 +305,7 @@
     { label: '指标口径', value: 'METRIC_DEFINITION' },
     { label: '后端业务源码', value: 'BACKEND_SOURCE' },
     { label: 'DAO / Repository / Mapper', value: 'DATA_ACCESS_CODE' },
-    { label: '历史 / 示例 SQL', value: 'SQL_QUERY' },
+    { label: '历史 SQL', value: 'SQL_QUERY' },
     { label: '数据库迁移脚本', value: 'DATABASE_MIGRATION' },
     { label: '接口文档', value: 'API_DOCUMENTATION' },
     { label: '产品 / 业务需求', value: 'PRODUCT_REQUIREMENT' },
@@ -571,7 +579,31 @@
       UPLOAD: '上传文件',
       CLONE: '版本继承',
       DATABASE_SCAN: '数据库扫描',
-    })[sourceType];
+    })[sourceType] || '其他来源';
+  const materialTypeLabel = (materialType?: string) =>
+    ({
+      JSON: 'JSON 配置',
+      YAML: 'YAML 配置',
+      MARKDOWN: 'Markdown 文档',
+      DDL: '数据库结构',
+      HISTORICAL_SQL: '历史 SQL',
+    })[String(materialType || '').toUpperCase()] || materialType || '资料';
+  const semanticAssetTypeLabel = (assetType?: string) =>
+    ({
+      MODEL: '业务对象',
+      COLUMN: '字段',
+      METRIC: '指标',
+      DIMENSION: '维度',
+      RELATIONSHIP: '业务关系',
+      GRAIN: '统计粒度',
+      ENUM_VALUE: '枚举值',
+      RULE: '业务规则',
+      GOLDEN_CASE: '验证案例',
+    })[String(assetType || '').toUpperCase()] || assetType || '业务资产';
+  const dispositionLabel = (disposition?: string) =>
+    ({ APPLIED: '已应用', CONFLICT: '存在冲突', QUARANTINED: '已隔离' })[
+      String(disposition || '').toUpperCase()
+    ] || disposition || '待处理';
   const parentDocumentName = (documentId: number) => {
     const parent = documents.value.find(item => item.id === documentId);
     return parent?.originalFilename || parent?.sourceName || '其他业务资料';

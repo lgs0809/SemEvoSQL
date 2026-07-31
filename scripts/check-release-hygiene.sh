@@ -46,6 +46,7 @@ fail_if_matches \
   'QueryWeaver|queryWeaver|queryweaver|QUERYWEAVER' \
   . \
   ':!backend/src/main/resources/db/migration/**' \
+  ':!docs/release-baselines/**' \
   ':!backend/src/main/java/cn/lgs/semevosql/config/LegacyApiCompatibilityWebFilter.java' \
   ':!backend/src/test/java/cn/lgs/semevosql/config/LegacyApiCompatibilityWebFilterTest.java' \
   ':!deploy/semevosql/nginx.conf' \

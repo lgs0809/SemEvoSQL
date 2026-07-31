@@ -3,20 +3,24 @@
  * Licensed under the Apache License, Version 2.0.
  -->
 <template>
-  <BaseLayout>
+  <BaseLayout focus>
     <section class="detail-page" v-loading="loading">
+      <div class="detail-topline">
+        <button class="detail-brand" type="button" @click="router.push('/projects')">
+          <span class="detail-brand-mark"><i class="bi bi-stars"></i></span>
+          <strong>SemEvoSQL</strong>
+        </button>
+        <span>项目工作区</span>
+      </div>
       <div class="detail-heading">
         <div>
           <el-button link :icon="ArrowLeft" @click="router.push('/projects')">返回项目</el-button>
           <h1>{{ projectView?.project.name || '项目详情' }}</h1>
-          <p>{{ projectView?.project.description || projectView?.project.businessDomain }}</p>
+          <p>{{ projectView?.project.description || projectView?.project.businessDomain || '管理数据接入、业务模型和查询质量。' }}</p>
         </div>
         <div class="heading-actions">
-          <el-button v-if="canManageMembers" @click="membersDialogVisible = true">
-            项目成员
-          </el-button>
           <el-tag v-if="health" :type="health.queryReady ? 'success' : 'warning'" effect="plain">
-            {{ health.queryReady ? '可以问数' : '准备中' }}
+            {{ health.queryReady ? '查询入口已就绪' : '业务模型待发布' }}
           </el-tag>
           <el-button
             type="primary"
@@ -52,7 +56,8 @@
 
       <ProjectLifecycle
         :health="health"
-        :show-action="!firstRunMode"
+        :compact="Boolean(health?.queryReady)"
+        :show-action="!firstRunMode && !health?.queryReady"
         @action="handleLifecycleAction"
       />
 
@@ -78,9 +83,9 @@
         </div>
       </el-card>
 
-      <el-card shadow="never" class="content-card">
+      <section class="content-card">
         <el-tabs v-model="activeSection" class="primary-tabs" @tab-change="syncSectionRoute">
-          <el-tab-pane label="概览" name="overview">
+          <el-tab-pane label="项目概览" name="overview">
             <ProjectOverview
               :health="health"
               :loading="healthLoading"
@@ -92,22 +97,16 @@
             />
           </el-tab-pane>
 
-          <el-tab-pane v-if="canManageMembers" label="外部 Agent" name="external" lazy>
+          <el-tab-pane v-if="canManageProject" label="外部接入" name="external" lazy>
             <ProjectMcpDeployment
               :project-id="projectId"
-              :can-manage="canManageMembers"
+              :can-manage="canManageProject"
               :query-ready="Boolean(health?.queryReady)"
             />
           </el-tab-pane>
 
-          <el-tab-pane v-if="canEditProject" label="准备" name="prepare" lazy>
-            <el-alert
-              class="group-intro"
-              type="info"
-              show-icon
-              :closable="false"
-              title="从数据连接和业务资料形成业务模型，只在无法安全推断时要求业务确认。"
-            />
+          <el-tab-pane v-if="canEditProject" label="模型准备" name="prepare" lazy>
+            <p class="group-intro">连接数据、补充资料并确认关键口径，形成可发布的业务模型。</p>
             <el-tabs v-model="prepareTab" class="secondary-tabs" @tab-change="syncPrepareTabRoute">
               <el-tab-pane label="数据连接" name="datasources" lazy>
                 <ProjectDatasourceBindings
@@ -141,14 +140,8 @@
             </el-tabs>
           </el-tab-pane>
 
-          <el-tab-pane v-if="canReviewProject" label="改进" name="improve" lazy>
-            <el-alert
-              class="group-intro"
-              type="info"
-              show-icon
-              :closable="false"
-              title="这里汇总系统从真实查询、纠错和运行轨迹中形成的改进信号；正式业务模型仍需经过验证、回归和发布。"
-            />
+          <el-tab-pane v-if="canReviewProject" label="持续改进" name="improve" lazy>
+            <p class="group-intro">这里汇总真实查询、纠错和运行轨迹形成的改进信号；正式模型仍需验证、回归和发布。</p>
             <el-tabs v-model="improveTab" class="secondary-tabs">
               <el-tab-pane label="改进建议" name="inbox" lazy>
                 <ProjectLearningInbox :project-id="projectId" @open="openImprovementDetail" />
@@ -195,7 +188,7 @@
                 <div class="section-copy">
                   <h2>验证业务模型</h2>
                   <p>
-                    使用现有评估与 Replay 事实验证业务模型变更，不把自动回归结果等同于人工发布决策。
+                    使用现有评估与自动回归记录验证业务模型变更，并将自动验证结果与人工发布决策明确区分。
                   </p>
                 </div>
                 <ProjectEvaluations
@@ -209,20 +202,14 @@
               <el-tab-pane label="语义治理" name="release" lazy>
                 <ProjectSemanticGovernance
                   :project-id="projectId"
-                  :can-manage="canManageMembers"
+                  :can-manage="canManageProject"
                   @changed="load"
                 />
               </el-tab-pane>
             </el-tabs>
           </el-tab-pane>
         </el-tabs>
-      </el-card>
-
-      <ProjectMembersDialog
-        v-if="canManageMembers"
-        v-model="membersDialogVisible"
-        :project-id="projectId"
-      />
+      </section>
 
     </section>
   </BaseLayout>
@@ -235,14 +222,7 @@
   import { ArrowLeft } from '@element-plus/icons-vue';
   import BaseLayout from '@/layouts/BaseLayout.vue';
   import ProjectLifecycle from '@/components/project/ProjectLifecycle.vue';
-  import { platformContext } from '@/services/platformContext';
-  import {
-    canEditProject as canEditProjectCapability,
-    canManageProject as canManageProjectCapability,
-    canReviewProject as canReviewProjectCapability,
-    projectSectionVisible,
-  } from '@/services/projectCapabilities.mjs';
-  import ProjectMembersDialog from '@/components/project/ProjectMembersDialog.vue';
+  import { projectSectionVisible } from '@/services/projectCapabilities.mjs';
   import ProjectOverview from '@/components/project/ProjectOverview.vue';
   import {
     projectDetailSectionForTarget,
@@ -252,8 +232,6 @@
   } from '@/services/projectExperience';
   import {
     semEvoSQLService,
-    type OperatorView,
-    type ProjectAccessView,
     type ProjectHealth,
     type ProjectInitializationView,
     type SemanticProjectVersion,
@@ -306,8 +284,6 @@
     return value || undefined;
   });
   const projectView = ref<ProjectInitializationView>();
-  const projectAccess = ref<ProjectAccessView>();
-  const operator = ref<OperatorView>();
   const health = ref<ProjectHealth>();
   const healthLoading = ref(false);
   const healthError = ref('');
@@ -357,52 +333,21 @@
   const governanceTab = ref(
     ['release', 'versions', 'releases'].includes(requestedSection) ? 'release' : 'test',
   );
-  const membersDialogVisible = ref(false);
-  const canEditProject = computed(() =>
-    canEditProjectCapability(
-      projectAccess.value?.accessRole,
-      operator.value?.role,
-      projectAccess.value?.globalAdmin,
-    ),
-  );
-  const canReviewProject = computed(() =>
-    canReviewProjectCapability(
-      projectAccess.value?.accessRole,
-      operator.value?.role,
-      projectAccess.value?.globalAdmin,
-    ),
-  );
-  const canPublishProject = computed(
-    () =>
-      Boolean(projectAccess.value?.globalAdmin) ||
-      (['EDITOR', 'OWNER'].includes(projectAccess.value?.accessRole || '') &&
-        ['PUBLISHER', 'ADMIN'].includes(operator.value?.role || '')),
-  );
-  const canAdminOperations = computed(
-    () => Boolean(projectAccess.value?.globalAdmin) || operator.value?.role === 'ADMIN',
-  );
-  const canManageMembers = computed(() =>
-    canManageProjectCapability(
-      projectAccess.value?.accessRole,
-      operator.value?.role,
-      projectAccess.value?.globalAdmin,
-    ),
-  );
-  const sectionVisible = (section: ProjectSection) =>
-    projectSectionVisible(section, {
-      edit: canEditProject.value,
-      review: canReviewProject.value,
-      manage: canManageMembers.value,
-    });
+  const canEditProject = computed(() => true);
+  const canReviewProject = computed(() => true);
+  const canPublishProject = computed(() => true);
+  const canAdminOperations = computed(() => true);
+  const canManageProject = computed(() => true);
+  const sectionVisible = (section: ProjectSection) => projectSectionVisible(section);
   const primaryAction = computed(() => projectPrimaryAction(health.value));
   const primaryActionLabel = computed(() => {
     if (
       health.value?.queryReady ||
       (!health.value && projectView.value?.project.activePublishedVersionId)
     ) {
-      return '开始问数';
+      return '打开查询工作台';
     }
-    return primaryAction.value?.label || '继续准备';
+    return primaryAction.value?.label || '继续建设模型';
   });
   const firstRunSubmitting = ref(false);
   const firstRunMode = computed(() => route.query.onboarding === '1' && !health.value?.queryReady);
@@ -424,7 +369,7 @@
     )
       return '业务模型已经通过验证，下一步发布并激活供新会话使用。';
     if (health.value.workingVersion?.status === 'PUBLISHED')
-      return '业务模型已经发布，下一步激活并开始第一次问数。';
+      return '业务模型已经发布，下一步激活查询入口并开始第一次分析。';
     return '按照当前项目事实完成剩余准备步骤。';
   });
   const firstRunActionLabel = computed(() => {
@@ -435,7 +380,7 @@
       health.value.workingVersion?.status === 'READY'
     )
       return '发布并继续';
-    if (health.value.workingVersion?.status === 'PUBLISHED') return '激活并开始问数';
+    if (health.value.workingVersion?.status === 'PUBLISHED') return '激活查询入口';
     return '继续设置';
   });
   const firstRunActionAllowed = computed(() => {
@@ -447,19 +392,9 @@
     }
     return canEditProject.value;
   });
-  const firstRunActionHint = computed(() => {
-    if (!firstRunActionAllowed.value) {
-      if (health.value?.workingVersion?.status === 'DRAFT')
-        return '需要项目编辑权限和 Reviewer 以上全局角色才能验证业务模型。';
-      if (
-        ['VALIDATED', 'READY', 'PUBLISHED'].includes(health.value?.workingVersion?.status || '')
-      ) {
-        return '需要项目编辑权限和 Publisher 以上全局角色才能发布或激活业务模型。';
-      }
-      return '当前账号只有查看权限，业务规则确认需要项目编辑权限。';
-    }
-    return health.value?.nextActions[0]?.description || '系统只会执行当前事实允许的下一步。';
-  });
+  const firstRunActionHint = computed(
+    () => health.value?.nextActions[0]?.description || '系统只会执行当前事实允许的下一步。',
+  );
 
   const loadHealth = async () => {
     healthLoading.value = true;
@@ -476,15 +411,11 @@
   const load = async () => {
     loading.value = true;
     try {
-      const [nextProjectView, nextProjectAccess, nextOperator, nextVersions] = await Promise.all([
+      const [nextProjectView, nextVersions] = await Promise.all([
         semEvoSQLService.project(projectId),
-        semEvoSQLService.projectAccess(projectId),
-        platformContext.operator(),
         semEvoSQLService.projectVersions(projectId),
       ]);
       projectView.value = nextProjectView;
-      projectAccess.value = nextProjectAccess;
-      operator.value = nextOperator;
       versions.value = nextVersions;
       if (!sectionVisible(activeSection.value)) {
         activeSection.value = 'overview';
@@ -583,7 +514,7 @@
         await semEvoSQLService.publishProjectVersion(projectId, working.id);
         await load();
         if (health.value?.queryReady) {
-          ElMessage.success('业务模型已发布并激活，可以开始第一次问数');
+          ElMessage.success('业务模型已发布并激活，可以开始第一次分析');
           await openChat();
         } else {
           ElMessage.success('业务模型已发布，下一步激活正式版本');
@@ -592,7 +523,7 @@
       }
       if (working.status === 'PUBLISHED') {
         await semEvoSQLService.activateProjectVersion(projectId, working.id);
-        ElMessage.success('业务模型已激活，可以开始问数');
+        ElMessage.success('业务模型已激活，查询入口已打开');
         await openChat();
         return;
       }
@@ -611,10 +542,40 @@
 
 <style scoped>
   .detail-page {
-    max-width: 1440px;
     min-height: 600px;
-    margin: 0 auto;
-    padding: 30px;
+    position: relative;
+  }
+  .detail-topline {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 18px;
+    color: #82939a;
+    font-size: 12px;
+  }
+  .detail-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: #17353b;
+    font: inherit;
+    font-weight: 720;
+    cursor: pointer;
+  }
+  .detail-brand-mark {
+    display: grid;
+    width: 28px;
+    height: 28px;
+    place-items: center;
+    border-radius: 9px;
+    background: #dff3ee;
+    color: #177d73;
+  }
+  .detail-heading::before {
+    display: none;
   }
   .detail-heading {
     display: flex;
@@ -623,19 +584,16 @@
     gap: 20px;
   }
   .detail-heading h1 {
-    margin: 10px 0 6px;
-    color: #0f172a;
-    font-size: 30px;
+    margin: 9px 0 6px;
   }
   .detail-heading p {
     margin: 0;
-    color: #64748b;
   }
   .heading-actions {
     display: flex;
     align-items: center;
     gap: 10px;
-    margin-top: 34px;
+    margin-top: 30px;
   }
   .health-error-alert {
     margin-top: 20px;
@@ -648,9 +606,9 @@
   }
   .first-run-card {
     margin-top: 22px;
-    border-color: #bfdbfe;
-    border-radius: 16px;
-    background: #f8fbff;
+    border-color: #b9e1d9;
+    border-radius: 14px;
+    background: #f2fbf8;
   }
   .first-run-heading,
   .first-run-action {
@@ -663,19 +621,18 @@
     margin-bottom: 18px;
   }
   .first-run-heading span {
-    color: #2563eb;
+    color: #177d73;
     font-size: 12px;
     font-weight: 700;
   }
   .first-run-heading h2 {
     margin: 5px 0 6px;
-    color: #0f172a;
     font-size: 20px;
   }
   .first-run-heading p,
   .first-run-action span {
     margin: 0;
-    color: #64748b;
+    color: #61757b;
     line-height: 1.6;
   }
   .first-run-action {
@@ -683,14 +640,27 @@
     margin-top: 18px;
   }
   .content-card {
-    min-height: 520px;
-    margin-top: 22px;
-    border-radius: 16px;
+    min-height: 0;
+    margin-top: 18px;
+    padding: 0 18px 22px;
+    border: 1px solid #dce7e7;
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: 0 8px 24px rgb(15 23 42 / 4%);
+  }
+  .primary-tabs :deep(.el-tabs__nav-wrap),
+  .secondary-tabs :deep(.el-tabs__nav-wrap) {
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+  .primary-tabs :deep(.el-tabs__nav),
+  .secondary-tabs :deep(.el-tabs__nav) {
+    white-space: nowrap;
   }
   .primary-tabs :deep(> .el-tabs__header .el-tabs__item) {
-    height: 48px;
-    padding: 0 22px;
-    font-weight: 600;
+    height: 50px;
+    padding: 0 20px;
+    font-weight: 650;
   }
   .secondary-tabs {
     margin-top: 4px;
@@ -699,7 +669,10 @@
     font-weight: 500;
   }
   .group-intro {
-    margin: 4px 0 16px;
+    margin: 0 0 12px;
+    color: #71858b;
+    font-size: 12px;
+    line-height: 1.6;
   }
   .section-copy,
   .tab-toolbar {
@@ -709,14 +682,13 @@
   .tab-toolbar h2,
   .release-placeholder h2 {
     margin: 0 0 6px;
-    color: #0f172a;
     font-size: 18px;
   }
   .section-copy p,
   .tab-toolbar p,
   .release-placeholder p {
     margin: 0;
-    color: #64748b;
+    color: #61757b;
     line-height: 1.6;
   }
   .tab-toolbar {
@@ -726,8 +698,9 @@
     gap: 16px;
   }
   .subtle {
-    color: #94a3b8;
-    font-size: 12px;
+    color: #82939a;
+    font-size: 13px;
+    line-height: 1.55;
   }
   .release-placeholder {
     padding: 8px 0;
@@ -736,12 +709,26 @@
     .detail-page {
       padding: 18px 10px;
     }
+    .detail-topline {
+      margin-bottom: 12px;
+    }
+    .content-card {
+      padding: 0 10px 16px;
+    }
     .detail-heading,
     .tab-toolbar {
       flex-direction: column;
     }
     .heading-actions {
       margin-top: 0;
+    }
+    .primary-tabs :deep(.el-tabs__item) {
+      padding: 0 14px;
+      font-size: 13px;
+    }
+    .secondary-tabs :deep(.el-tabs__item) {
+      padding: 0 12px;
+      font-size: 13px;
     }
     .health-error-content,
     .first-run-heading,

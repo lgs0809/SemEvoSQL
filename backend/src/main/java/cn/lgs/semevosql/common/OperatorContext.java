@@ -16,36 +16,26 @@
 package cn.lgs.semevosql.common;
 
 import java.security.Principal;
-import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.GrantedAuthority;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
-/** Server-resolved identity, role and request envelope for governed mutations. */
-public record OperatorContext(String operator, OperatorRole role, String source, String requestId,
-		String idempotencyKey) {
-
-	public OperatorContext(String operator, String source, String requestId, String idempotencyKey) {
-		this(operator, OperatorRole.VIEWER, source, requestId, idempotencyKey);
-	}
+/** Server-resolved local operator and request envelope for governed mutations. */
+public record OperatorContext(String operator, String source, String requestId, String idempotencyKey) {
 
 	public OperatorContext {
-		if (!StringUtils.hasText(operator) || role == null || !StringUtils.hasText(source)
+		if (!StringUtils.hasText(operator) || !StringUtils.hasText(source)
 				|| !StringUtils.hasText(requestId) || !StringUtils.hasText(idempotencyKey)) {
-			throw new IllegalArgumentException(
-					"Operator identity, role, source, requestId and idempotencyKey are required");
+			throw new IllegalArgumentException("Operator identity, source, requestId and idempotencyKey are required");
 		}
 	}
 
 	public static OperatorContext system(String operation) {
 		String requestId = UUID.randomUUID().toString();
-		return new OperatorContext("semevosql-system", OperatorRole.ADMIN, "SYSTEM", requestId,
-				operation + ":" + requestId);
+		return new OperatorContext("semevosql-system", "SYSTEM", requestId, operation + ":" + requestId);
 	}
 
 	@Component
@@ -62,66 +52,15 @@ public record OperatorContext(String operator, OperatorRole role, String source,
 			this.properties = properties;
 		}
 
+		/**
+		 * Resolve every HTTP request to the configured local operator. The Principal parameter is retained only
+		 * for controller signature compatibility; SemEvoSQL intentionally has no browser account boundary.
+		 */
 		public OperatorContext resolve(HttpHeaders headers, Principal principal, String operation) {
 			String requestId = header(headers, "X-Request-ID", UUID.randomUUID().toString());
 			String idempotencyKey = header(headers, "Idempotency-Key", operation + ":" + requestId);
-			if (principal != null && StringUtils.hasText(principal.getName())) {
-				String operator = principal.getName().trim();
-				OperatorRole role = authenticatedRole(principal);
-				if (role == null) {
-					role = mappedRole(operator);
-				}
-				if (role == null) {
-					if (!properties.isDevelopmentMode()) {
-						throw new SecurityException(
-								"Authenticated operator has no server-side role mapping: " + operator);
-					}
-					role = properties.getDefaultRole();
-				}
-				return new OperatorContext(operator, role, "AUTHENTICATED_HTTP", requestId, idempotencyKey);
-			}
-			if (!properties.isDevelopmentMode()) {
-				throw new SecurityException("Authenticated operator is required outside development mode");
-			}
 			String operator = required(properties.getDefaultOperator(), "semevosql.operator.default-operator");
-			OperatorRole role = Objects.requireNonNull(properties.getDefaultRole(),
-					"semevosql.operator.default-role is required");
-			return new OperatorContext(operator, role, "DEVELOPMENT_SINGLE_USER", requestId, idempotencyKey);
-		}
-
-		private OperatorRole mappedRole(String operator) {
-			Map<String, OperatorRole> mappings = properties.getRoleMappings();
-			return mappings == null ? null : mappings.get(operator);
-		}
-
-		private OperatorRole authenticatedRole(Principal principal) {
-			if (!(principal instanceof Authentication authentication)) {
-				return null;
-			}
-			OperatorRole resolved = null;
-			for (GrantedAuthority authority : authentication.getAuthorities()) {
-				String value = authority.getAuthority();
-				if (!StringUtils.hasText(value)) {
-					continue;
-				}
-				String normalized = value.trim().toUpperCase();
-				if (normalized.startsWith("ROLE_")) {
-					normalized = normalized.substring("ROLE_".length());
-				}
-				if (normalized.startsWith("SEMEVOSQL_")) {
-					normalized = normalized.substring("SEMEVOSQL_".length());
-				}
-				try {
-					OperatorRole candidate = OperatorRole.valueOf(normalized);
-					if (resolved == null || candidate.atLeast(resolved)) {
-						resolved = candidate;
-					}
-				}
-				catch (IllegalArgumentException ignored) {
-					// Ignore unrelated authorities.
-				}
-			}
-			return resolved;
+			return new OperatorContext(operator, "SELF_HOSTED_SINGLE_USER", requestId, idempotencyKey);
 		}
 
 		private String header(HttpHeaders headers, String name, String fallback) {
@@ -135,7 +74,5 @@ public record OperatorContext(String operator, OperatorRole role, String source,
 			}
 			return value.trim();
 		}
-
 	}
-
 }

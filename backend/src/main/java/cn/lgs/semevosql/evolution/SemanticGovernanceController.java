@@ -26,8 +26,7 @@ import cn.lgs.semevosql.evolution.application.SemanticGovernanceApplicationServi
 import cn.lgs.semevosql.evolution.application.SemanticGovernanceApplicationService.ProjectSemanticReadinessView;
 import cn.lgs.semevosql.evolution.application.SemanticGovernanceApplicationService.VersionTimelineView;
 import cn.lgs.semevosql.evolution.application.SemanticVersionApplicationService.ActivationResult;
-import cn.lgs.semevosql.project.security.ProjectAccessRole;
-import cn.lgs.semevosql.project.security.ProjectAccessService;
+import cn.lgs.semevosql.project.application.ProjectScopeService;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import java.security.Principal;
@@ -51,21 +50,21 @@ public class SemanticGovernanceController {
 
     private final SemanticGovernanceApplicationService governanceService;
 
-    private final ProjectAccessService projectAccessService;
+    private final ProjectScopeService projectScope;
 
     private final OperatorContext.Resolver operatorResolver;
 
     @GetMapping("/projects/{projectId}/semantic-versions/timeline")
     public VersionTimelineView timeline(@PathVariable Long projectId, @RequestHeader HttpHeaders headers,
             Principal principal) {
-        requireProject(projectId, headers, principal, ProjectAccessRole.VIEWER, "semantic-version-timeline");
+        requireProject(projectId, headers, principal, "semantic-version-timeline");
         return governanceService.timeline(projectId);
     }
 
     @GetMapping("/projects/{projectId}/corpus-revisions")
     public List<CorpusRevision> corpusRevisions(@PathVariable Long projectId, @RequestHeader HttpHeaders headers,
             Principal principal) {
-        requireProject(projectId, headers, principal, ProjectAccessRole.VIEWER, "corpus-revisions");
+        requireProject(projectId, headers, principal, "corpus-revisions");
         return governanceService.corpusRevisions(projectId);
     }
 
@@ -73,33 +72,32 @@ public class SemanticGovernanceController {
     public List<ChangeSet> changeSets(@PathVariable Long projectId, @RequestParam(required = false) Status status,
             @RequestParam(defaultValue = "100") @Min(1) @Max(500) int limit, @RequestHeader HttpHeaders headers,
             Principal principal) {
-        requireProject(projectId, headers, principal, ProjectAccessRole.VIEWER, "semantic-change-sets");
+        requireProject(projectId, headers, principal, "semantic-change-sets");
         return governanceService.changeSets(projectId, status, limit);
     }
 
     @GetMapping("/semantic-change-sets/{changeSetId}")
     public ChangeSetView changeSet(@PathVariable String changeSetId, @RequestHeader HttpHeaders headers,
             Principal principal) {
-        Long projectId = projectAccessService.projectForSemanticChangeSet(changeSetId)
+        Long projectId = projectScope.projectForSemanticChangeSet(changeSetId)
             .orElseThrow(() -> new IllegalArgumentException("SemanticChangeSet not found: " + changeSetId));
-        requireProject(projectId, headers, principal, ProjectAccessRole.VIEWER, "semantic-change-set:" + changeSetId);
+        requireProject(projectId, headers, principal, "semantic-change-set:" + changeSetId);
         return governanceService.changeSet(changeSetId);
     }
 
     @GetMapping("/episodes/{episodeId}/diagnosis")
     public EpisodeDiagnosisView episodeDiagnosis(@PathVariable String episodeId, @RequestHeader HttpHeaders headers,
             Principal principal) {
-        Long projectId = projectAccessService.projectForEpisode(episodeId)
+        Long projectId = projectScope.projectForEpisode(episodeId)
             .orElseThrow(() -> new IllegalArgumentException("Episode not found: " + episodeId));
-        requireProject(projectId, headers, principal, ProjectAccessRole.VIEWER, "episode-diagnosis:" + episodeId);
+        requireProject(projectId, headers, principal, "episode-diagnosis:" + episodeId);
         return governanceService.episodeDiagnosis(episodeId);
     }
 
     @GetMapping("/projects/{projectId}/semantic-readiness")
     public ProjectSemanticReadinessView readiness(@PathVariable Long projectId, @RequestHeader HttpHeaders headers,
             Principal principal) {
-        OperatorContext operator = requireProject(projectId, headers, principal, ProjectAccessRole.VIEWER,
-                "semantic-readiness");
+        OperatorContext operator = requireProject(projectId, headers, principal, "semantic-readiness");
         return governanceService.readiness(projectId, operator);
     }
 
@@ -107,10 +105,10 @@ public class SemanticGovernanceController {
     public ReleaseResult promoteMajor(@PathVariable String changeSetId,
             @RequestBody(required = false) GovernanceActionRequest request, @RequestHeader HttpHeaders headers,
             Principal principal) {
-        Long projectId = projectAccessService.projectForSemanticChangeSet(changeSetId)
+        Long projectId = projectScope.projectForSemanticChangeSet(changeSetId)
             .orElseThrow(() -> new IllegalArgumentException("SemanticChangeSet not found: " + changeSetId));
-        OperatorContext operator = requireProject(projectId, headers, principal, ProjectAccessRole.OWNER,
-                "semantic-major-promote:" + changeSetId);
+        OperatorContext operator = requireProject(projectId, headers, principal,
+				"semantic-major-promote:" + changeSetId);
         return governanceService.promoteMajor(changeSetId, operator.operator(), operator.requestId(), reason(request));
     }
 
@@ -118,15 +116,14 @@ public class SemanticGovernanceController {
     public ActivationResult rollback(@PathVariable Long projectId, @PathVariable Long versionId,
             @RequestBody(required = false) GovernanceActionRequest request, @RequestHeader HttpHeaders headers,
             Principal principal) {
-        OperatorContext operator = requireProject(projectId, headers, principal, ProjectAccessRole.OWNER,
-                "semantic-version-rollback:" + versionId);
+        OperatorContext operator = requireProject(projectId, headers, principal,
+				"semantic-version-rollback:" + versionId);
         return governanceService.rollback(projectId, versionId, operator.operator(), operator.requestId(), reason(request));
     }
 
-    private OperatorContext requireProject(Long projectId, HttpHeaders headers, Principal principal,
-            ProjectAccessRole required, String source) {
+    private OperatorContext requireProject(Long projectId, HttpHeaders headers, Principal principal, String source) {
         OperatorContext operator = operatorResolver.resolve(headers, principal, source + ":" + projectId);
-        projectAccessService.requireAccess(projectId, operator, required);
+        projectScope.requireProject(projectId, operator);
         return operator;
     }
 

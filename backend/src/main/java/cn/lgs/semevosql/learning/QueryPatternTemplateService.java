@@ -16,6 +16,7 @@
 package cn.lgs.semevosql.learning;
 
 import cn.lgs.semevosql.common.json.CanonicalJson;
+import cn.lgs.semevosql.run.RunExecutionFenceService;
 import cn.lgs.semevosql.semantic.compiler.CompiledSemanticQuery.CompiledSourceQuery;
 import cn.lgs.semevosql.semantic.domain.SemanticBlueprint;
 import cn.lgs.semevosql.util.JsonUtil;
@@ -28,6 +29,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -46,9 +48,19 @@ public class QueryPatternTemplateService {
 
 	private final ObjectMapper mapper = JsonUtil.getObjectMapper();
 
-	public QueryPatternTemplateService(JdbcTemplate jdbc, CanonicalJson canonicalJson) {
+	private final RunExecutionFenceService executionFence;
+
+	@Autowired
+	public QueryPatternTemplateService(JdbcTemplate jdbc, CanonicalJson canonicalJson,
+			RunExecutionFenceService executionFence) {
 		this.jdbc = jdbc;
 		this.canonicalJson = canonicalJson;
+		this.executionFence = executionFence;
+	}
+
+	/** Lightweight constructor retained for focused shape tests. */
+	public QueryPatternTemplateService(JdbcTemplate jdbc, CanonicalJson canonicalJson) {
+		this(jdbc, canonicalJson, null);
 	}
 
 	@Transactional
@@ -63,6 +75,7 @@ public class QueryPatternTemplateService {
 	public CaptureMode captureSuccessful(String patternId, Long projectId, Long projectVersionId, String catalogHash,
 			String runId, String attemptId, SemanticBlueprint plan, List<Map<String, Object>> sqlTraces,
 			boolean hadClarification, boolean corrected, boolean postExecutionReviewPassed) {
+		assertFinalizer(runId, attemptId);
 		if (plan == null || !plan.isExecutable() || corrected || projectId == null || projectVersionId == null
 				|| !StringUtils.hasText(patternId)) {
 			return CaptureMode.NONE;
@@ -126,8 +139,19 @@ public class QueryPatternTemplateService {
 
 	@Transactional
 	public void markUsed(String templateId) {
+		markUsed(templateId, null, null);
+	}
+
+	@Transactional
+	public void markUsed(String templateId, String runId, String attemptId) {
 		if (!StringUtils.hasText(templateId)) {
 			return;
+		}
+		if (StringUtils.hasText(runId) && StringUtils.hasText(attemptId)) {
+			if (executionFence == null) {
+				throw new IllegalStateException("Run execution fence is required for attempt-scoped pattern usage");
+			}
+			executionFence.assertActiveAndLock(runId, attemptId);
 		}
 		jdbc.update("""
 				UPDATE qw_query_pattern_template
@@ -146,6 +170,16 @@ public class QueryPatternTemplateService {
 				SET status = 'INVALIDATED', invalidation_reason = ?, update_time = CURRENT_TIMESTAMP
 				WHERE source_run_id = ? AND status = 'ACTIVE'
 				""", trim(reason, 1000), runId);
+	}
+
+	private void assertFinalizer(String runId, String attemptId) {
+		if (!StringUtils.hasText(runId) || !StringUtils.hasText(attemptId)) {
+			return;
+		}
+		if (executionFence == null) {
+			throw new IllegalStateException("Run execution fence is required for attempt-scoped pattern capture");
+		}
+		executionFence.assertFinalizerOwnsRunAndLock(runId, attemptId);
 	}
 
 	public String executionShapeHash(SemanticBlueprint plan, Integer datasourceId) {

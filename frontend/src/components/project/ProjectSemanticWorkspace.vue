@@ -14,11 +14,16 @@
         </div>
         <p>用业务对象、指标、维度、枚举、时间和关系描述“系统应该怎样理解业务问题”。</p>
       </div>
-      <el-select v-model="selectedVersionId" class="version-select" @change="load">
+      <el-select
+        v-model="selectedVersionId"
+        class="version-select"
+        placeholder="选择版本"
+        @change="load"
+      >
         <el-option
           v-for="version in versions"
           :key="version.id"
-          :label="`v${version.versionNumber} · ${versionStatusLabel(version.status)}`"
+          :label="`v${version.versionNumber} · ${sharedVersionStatusLabel(version.status)}`"
           :value="version.id"
         />
       </el-select>
@@ -90,9 +95,11 @@
               <div class="asset-heading">
                 <div>
                   <strong>
-                    {{ text(model.businessName) || text(model.modelCode) || '未命名业务对象' }}
+                    {{ businessObjectName(model.modelCode) || '未命名业务对象' }}
                   </strong>
-                  <span>{{ text(model.description) || '暂无业务描述' }}</span>
+                  <span>
+                    {{ text(model.description) || '尚未填写业务描述' }}
+                  </span>
                 </div>
                 <el-button v-if="editable" link type="primary" @click="editAsset('models', index)">
                   编辑
@@ -118,7 +125,7 @@
               </dl>
               <div v-if="text(model.evidence)" class="evidence-line">
                 <span>来源证据</span>
-                <small>{{ text(model.evidence) }}</small>
+                  <small>{{ evidenceLabel(model.evidence) }}</small>
               </div>
             </article>
           </div>
@@ -235,7 +242,9 @@
                 </div>
               </template>
             </el-table-column>
-            <el-table-column prop="modelCode" label="业务对象" min-width="140" />
+                <el-table-column label="业务对象" min-width="140">
+                  <template #default="scope">{{ businessObjectName(scope.row.modelCode) }}</template>
+                </el-table-column>
             <el-table-column label="来源" min-width="180">
               <template #default="scope">
                 {{ text(scope.row.expression) || text(scope.row.columnName) || '-' }}
@@ -318,7 +327,9 @@
               <h4>默认时间字段</h4>
               <el-table :data="timeColumns" size="small" empty-text="尚未识别时间字段">
                 <el-table-column prop="businessName" label="业务含义" min-width="160" />
-                <el-table-column prop="modelCode" label="业务对象" min-width="130" />
+                <el-table-column label="业务对象" min-width="130">
+                  <template #default="scope">{{ businessObjectName(scope.row.modelCode) }}</template>
+                </el-table-column>
                 <el-table-column prop="columnName" label="字段" min-width="150" />
                 <el-table-column prop="synonyms" label="同义词" min-width="180" />
                 <el-table-column v-if="editable" label="操作" width="70">
@@ -339,7 +350,7 @@
                   <div>
                     <strong>{{ text(grain.description) || text(grain.grainCode) }}</strong>
                     <small>
-                      {{ text(grain.modelCode) }} · Key: {{ text(grain.keyColumns) || '-' }} · 时间:
+                      {{ businessObjectName(grain.modelCode) }} · 关联键：{{ text(grain.keyColumns) || '-' }} · 时间：
                       {{ text(grain.timeColumn) || '-' }}
                     </small>
                   </div>
@@ -388,7 +399,7 @@
           <div class="section-heading">
             <div>
               <h3>业务关系</h3>
-              <p>说明业务对象之间如何关联；Join 条件默认作为依据，而不是用户首先需要理解的概念。</p>
+              <p>说明业务对象之间如何关联；关联条件默认作为依据，而不是用户首先需要理解的概念。</p>
             </div>
             <el-button v-if="editable" type="primary" plain @click="addAsset('relationships')">
               新增关系
@@ -418,8 +429,8 @@
               <details>
                 <summary>查看关联依据</summary>
                 <code>
-                  {{ text(relationship.joinType) || 'JOIN' }} ·
-                  {{ text(relationship.joinCondition) || '未记录 Join 条件' }}
+                  {{ text(relationship.joinType) || '关联' }} ·
+                  {{ text(relationship.joinCondition) || '未记录关联条件' }}
                 </code>
                 <small v-if="text(relationship.evidence)">
                   来源：{{ text(relationship.evidence) }}
@@ -484,7 +495,9 @@
                 <el-table-column label="数据连接" min-width="160">
                   <template #default="scope">{{ datasourceLabel(scope.row.datasourceId) }}</template>
                 </el-table-column>
-                <el-table-column prop="sourceRole" label="来源角色" min-width="140" />
+                <el-table-column label="来源角色" min-width="140">
+                  <template #default="scope">{{ sourceRoleLabel(scope.row.sourceRole) }}</template>
+                </el-table-column>
                 <el-table-column prop="priority" label="优先级" width="90" />
                 <el-table-column label="允许回退" width="100">
                   <template #default="scope">
@@ -531,7 +544,9 @@
             <el-tab-pane label="结果合并">
               <el-table :data="policy.mergePolicies" empty-text="尚无结果合并规则" size="small">
                 <el-table-column prop="policyCode" label="规则" min-width="160" />
-                <el-table-column prop="mergeType" label="合并方式" min-width="170" />
+                <el-table-column label="合并方式" min-width="170">
+                  <template #default="scope">{{ mergeTypeLabel(scope.row.mergeType) }}</template>
+                </el-table-column>
                 <el-table-column prop="inputGrain" label="输入粒度" min-width="140" />
                 <el-table-column prop="maxRows" label="最大行数" width="110" />
                 <el-table-column prop="partialFailurePolicy" label="部分失败策略" min-width="160" />
@@ -544,7 +559,7 @@
             type="info"
             :closable="false"
             show-icon
-            title="多数据源策略包含跨来源唯一性、基数、时区与 Merge 上限等安全约束；当前仍通过高级模式完整编辑，并由后端结构校验保护。"
+            title="多数据源策略包含跨来源唯一性、基数、时区与合并上限等安全约束；当前仍通过高级模式完整编辑，并由后端结构校验保护。"
           />
         </el-tab-pane>
 
@@ -565,7 +580,7 @@
                 :readonly="!editable"
               />
               <div class="editor-actions">
-                <span>保存后仍由服务端完整结构校验；Published 版本不可写。</span>
+                <span>保存后仍由服务端完整结构校验；已发布版本不可写。</span>
                 <el-button
                   type="primary"
                   :disabled="!editable"
@@ -585,7 +600,7 @@
                 :readonly="!editable"
               />
               <div class="editor-actions">
-                <span>保存时继续验证数据源、字段、时区、唯一性、基数和 Merge 上限。</span>
+                <span>保存时继续验证数据源、字段、时区、唯一性、基数和合并上限。</span>
                 <el-button
                   type="primary"
                   :disabled="!editable"
@@ -607,7 +622,7 @@
         type="info"
         :closable="false"
         show-icon
-        title="这次修改只写入当前 Draft。正式问数版本不会被直接改动。"
+        title="这次修改只写入当前 Draft。正式查询版本不会被直接改动。"
       />
       <el-form v-if="editorDraft" label-position="top">
         <el-form-item v-for="field in editorFields" :key="field.key" :label="field.label">
@@ -637,7 +652,7 @@
       <template #footer>
         <el-button @click="editorVisible = false">取消</el-button>
         <el-button type="primary" :loading="savingCatalog" @click="saveEditedAsset">
-          保存到 Draft
+          保存到草稿
         </el-button>
       </template>
     </el-drawer>
@@ -655,6 +670,12 @@
     type SemanticCatalogSnapshot,
     type SemanticProjectVersion,
   } from '@/services/semevosql';
+  import {
+    datasourceDisplayName,
+    mergeTypeLabel,
+    sourceRoleLabel,
+    versionStatusLabel as sharedVersionStatusLabel,
+  } from '@/services/displayLabels';
 
   type BusinessSection =
     | 'objects'
@@ -888,7 +909,9 @@
       policy.value = nextPolicy;
       violations.value = nextViolations;
       datasourceNames.value = Object.fromEntries(
-        datasources.filter(item => item.id).map(item => [item.id as number, item.name || `数据连接 ${item.id}`]),
+        datasources
+          .filter(item => item.id)
+          .map(item => [item.id as number, datasourceDisplayName(item)]),
       );
       syncJsonEditors();
     } catch (error) {
@@ -1073,7 +1096,7 @@
     else if (editorIndex.value >= 0) collection[editorIndex.value] = editorDraft.value;
     else return;
     try {
-      await saveCatalogSnapshot(next, `${editorTitle.value}已保存到 Draft`);
+      await saveCatalogSnapshot(next, `${editorTitle.value}已保存到草稿`);
       editorVisible.value = false;
       editorCreating.value = false;
     } catch {
@@ -1101,16 +1124,18 @@
   };
   const businessObjectName = (modelCode: unknown) => {
     const model = catalog.value?.models.find(item => item.modelCode === modelCode);
-    return text(model?.businessName) || text(modelCode) || '-';
+    const code = text(modelCode);
+    const businessName = text(model?.businessName);
+    return businessName && businessName !== code ? businessName : '业务对象';
   };
-  const versionStatusLabel = (status: string) => {
-    if (status === 'DRAFT') return '草稿';
-    if (status === 'VALIDATED' || status === 'READY') return '验证通过';
-    if (status === 'PUBLISHED') return '已发布';
-    if (status === 'ARCHIVED') return '已归档';
-    return status;
+  const evidenceLabel = (value: unknown) => {
+    const raw = text(value);
+    if (/database-schema-scan:table=/i.test(raw)) {
+      return `数据库结构扫描（物理表：${raw.split('=').slice(1).join('=') || '未标注'}）`;
+    }
+    if (/^(docs|document|file|upload)\//i.test(raw)) return '业务资料（文档来源）';
+    return raw || '未记录来源证据';
   };
-
   watch(
     () => props.versions,
     () => {

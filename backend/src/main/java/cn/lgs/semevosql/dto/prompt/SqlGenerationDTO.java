@@ -45,4 +45,7 @@ public class SqlGenerationDTO {
 
 	private String dialect;
 
+	/** Absolute interactive Run deadline; null keeps this DTO compatible with non-Graph callers. */
+	private Long runDeadlineEpochMillis;
+
 }

@@ -42,6 +42,12 @@ public class SemanticBlueprint {
 	private String compilerMode = "DETERMINISTIC";
 
 	@Builder.Default
+	private ComputationIntent computationIntent = ComputationIntent.empty();
+
+	@Builder.Default
+	private List<BindingDependency> bindingDependencies = new ArrayList<>();
+
+	@Builder.Default
 	private List<ProjectionSelection> projections = new ArrayList<>();
 
 	@Builder.Default
@@ -99,6 +105,28 @@ public class SemanticBlueprint {
 	private List<String> validationErrors = new ArrayList<>();
 
 	private boolean executable;
+
+	@Data
+	@Builder
+	@NoArgsConstructor
+	@AllArgsConstructor
+	public static class BindingDependency {
+
+		private String phrase;
+
+		private String assetType;
+
+		private String assetKey;
+
+		private String scope;
+
+		private String source;
+
+		private String principalId;
+
+		private Long sourceRecordId;
+
+	}
 
 	@Data
 	@Builder

@@ -23,6 +23,6 @@ public record QueryExecutionExplanation(String understoodQuery, List<Map<String,
 		List<Map<String, Object>> businessDefinitions, List<Map<String, Object>> filters, Map<String, Object> time,
 		List<Map<String, Object>> groups, List<Map<String, Object>> ordering, Integer limit,
 		List<Map<String, Object>> models, List<Map<String, Object>> relationships,
-		List<Map<String, Object>> datasources, List<Map<String, Object>> sqlExecutions, List<String> reusedSteps,
-		Map<String, Object> execution) {
+			List<Map<String, Object>> datasources, List<Map<String, Object>> sqlExecutions, List<String> reusedSteps,
+			Map<String, Object> execution, List<Map<String, Object>> resultColumns) {
 }

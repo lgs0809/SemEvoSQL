@@ -21,6 +21,10 @@ jobs:
         run: ./scripts/check-release-hygiene.sh
       - name: Backend verify
         run: ./mvnw -s .github/maven-settings.xml -pl backend -am verify
+      - name: Verify v1.0.0 migration baseline
+        run: sh scripts/verify-migration-baseline.sh
+      - name: Verify database upgrade matrix
+        run: bash scripts/verify-db-upgrade-matrix.sh
 
   frontend:
     runs-on: ubuntu-latest
@@ -35,10 +39,7 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
-      - run: npm run lint:check
-      - run: npm run typecheck
-      - run: npm run unused
-      - run: npm run build
+      - run: npm run verify
       - run: npm audit --audit-level=high
 
   docker-release-smoke:
@@ -53,6 +54,9 @@ jobs:
       SEMEVOSQL_FRONTEND_PORT: '23000'
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.12.0'
       - name: Create ephemeral deployment environment
         run: ./scripts/init-deployment-env.sh
       - name: Validate Compose
@@ -61,6 +65,12 @@ jobs:
           --env-file deploy/semevosql/.env
           -f deploy/semevosql/docker-compose.yml
           --profile app config --quiet
+      - name: Reject non-loopback exposure by default
+        run: |
+          if SEMEVOSQL_BIND_HOST=0.0.0.0 ./scripts/start-semevosql.sh; then
+            echo "Non-loopback exposure was unexpectedly accepted" >&2
+            exit 1
+          fi
       - name: Build and start portable deployment
         env:
           SEMEVOSQL_BUILD: 'true'
@@ -69,7 +79,25 @@ jobs:
       - name: Verify backend and frontend
         run: |
           curl -fsS http://127.0.0.1:28065/actuator/health
+          curl -fsS http://127.0.0.1:28065/api/semevosql/operator-context | grep -q 'SELF_HOSTED_SINGLE_USER'
           curl -fsS http://127.0.0.1:23000/semevosql/ >/dev/null
+      - name: Verify hardened execution runtime
+        run: |
+          compose=(docker compose --env-file deploy/semevosql/.env -f deploy/semevosql/docker-compose.yml --profile app)
+          worker_id="$("${compose[@]}" ps -q execution-worker)"
+          test -n "$worker_id"
+          test "$(docker inspect -f '{{.Config.User}}' "$worker_id")" != "0:0"
+          test "$(docker inspect -f '{{.HostConfig.ReadonlyRootfs}}' "$worker_id")" = "true"
+          docker inspect -f '{{json .HostConfig.SecurityOpt}}' "$worker_id" | grep -q 'no-new-privileges:true'
+          test "$("${compose[@]}" port backend 8065)" = "127.0.0.1:28065"
+          test "$("${compose[@]}" port frontend 8080)" = "127.0.0.1:23000"
+          docker run --rm --network none --read-only --user 65534:65534 \
+            semevosql/python-runner:1.0.0 \
+            python3 -c "import numpy, pandas; print('runner-ok')"
+      - name: Browser acceptance
+        env:
+          SEMEVOSQL_WEB_URL: http://127.0.0.1:23000/semevosql
+        run: node frontend/scripts/browser-acceptance.mjs
       - name: Show container logs on failure
         if: failure()
         run: >-

@@ -17,11 +17,13 @@ package cn.lgs.semevosql.controller;
 
 import cn.lgs.semevosql.dto.ModelConfigDTO;
 import cn.lgs.semevosql.enums.ModelType;
+import cn.lgs.semevosql.properties.ModelClientProperties;
 import cn.lgs.semevosql.service.aimodelconfig.ModelConfigDataService;
 import cn.lgs.semevosql.service.aimodelconfig.ModelConfigOpsService;
 import cn.lgs.semevosql.vo.ApiResponse;
 import cn.lgs.semevosql.vo.ModelCheckVo;
 import jakarta.validation.Valid;
+import java.time.LocalDateTime;
 import java.util.List;
 import lombok.AllArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -43,6 +45,8 @@ public class ModelConfigController {
 	private final ModelConfigDataService modelConfigDataService;
 
 	private final ModelConfigOpsService modelConfigOpsService;
+
+	private final ModelClientProperties modelClientProperties;
 
 	@GetMapping("/list")
 	public ApiResponse<List<ModelConfigDTO>> list() {
@@ -97,30 +101,47 @@ public class ModelConfigController {
 		}).subscribeOn(Schedulers.boundedElastic());
 	}
 
-	/** 返回各模型能力的配置/验证状态。Chat、Embedding、Rerank 均为标准问数链路的必需能力。 */
+	/** 返回各模型能力的当前验证状态。Chat、Embedding、Rerank 均为标准问数链路的必需能力。 */
 	@GetMapping("/check-ready")
 	public ApiResponse<ModelCheckVo> checkReady() {
 		ModelConfigDTO chatModel = modelConfigDataService.getActiveConfigByType(ModelType.CHAT);
 		ModelConfigDTO embeddingModel = modelConfigDataService.getActiveConfigByType(ModelType.EMBEDDING);
 		ModelConfigDTO rerankModel = modelConfigDataService.getActiveConfigByType(ModelType.RERANK);
-		boolean chatModelConfigured = chatModel != null;
-		boolean embeddingModelConfigured = embeddingModel != null;
-		boolean rerankModelConfigured = rerankModel != null;
-		boolean chatModelReady = chatModelConfigured && "PASSED".equals(chatModel.getValidationStatus());
-		boolean embeddingModelReady = embeddingModelConfigured && "PASSED".equals(embeddingModel.getValidationStatus());
-		boolean rerankModelReady = rerankModelConfigured && "PASSED".equals(rerankModel.getValidationStatus());
+		String chatStatus = readinessStatus(chatModel);
+		String embeddingStatus = readinessStatus(embeddingModel);
+		String rerankStatus = readinessStatus(rerankModel);
+		boolean chatModelReady = "VERIFIED".equals(chatStatus);
+		boolean embeddingModelReady = "VERIFIED".equals(embeddingStatus);
+		boolean rerankModelReady = "VERIFIED".equals(rerankStatus);
 		return ApiResponse.success("模型配置检查完成", ModelCheckVo.builder()
-			.chatModelConfigured(chatModelConfigured)
+			.chatModelConfigured(chatModel != null)
 			.chatModelReady(chatModelReady)
+			.chatModelStatus(chatStatus)
 			.chatModelLastValidationTime(chatModel == null ? null : chatModel.getLastValidationTime())
-			.embeddingModelConfigured(embeddingModelConfigured)
+			.embeddingModelConfigured(embeddingModel != null)
 			.embeddingModelReady(embeddingModelReady)
+			.embeddingModelStatus(embeddingStatus)
 			.embeddingModelLastValidationTime(embeddingModel == null ? null : embeddingModel.getLastValidationTime())
-			.rerankModelConfigured(rerankModelConfigured)
+			.rerankModelConfigured(rerankModel != null)
 			.rerankModelReady(rerankModelReady)
+			.rerankModelStatus(rerankStatus)
 			.rerankModelLastValidationTime(rerankModel == null ? null : rerankModel.getLastValidationTime())
 			.ready(chatModelReady && embeddingModelReady && rerankModelReady)
 			.build());
+	}
+
+	private String readinessStatus(ModelConfigDTO model) {
+		if (model == null) {
+			return "NOT_CONFIGURED";
+		}
+		if ("FAILED".equals(model.getValidationStatus())) {
+			return "UNAVAILABLE";
+		}
+		if (!"PASSED".equals(model.getValidationStatus()) || model.getLastValidationTime() == null) {
+			return "CONFIGURED";
+		}
+		LocalDateTime staleBefore = LocalDateTime.now().minus(modelClientProperties.getValidationFreshness());
+		return model.getLastValidationTime().isBefore(staleBefore) ? "STALE" : "VERIFIED";
 	}
 
 }

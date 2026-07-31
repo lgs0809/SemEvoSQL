@@ -21,8 +21,6 @@ import cn.lgs.semevosql.project.domain.ProjectVersionCatalogReadiness.CatalogRea
 import cn.lgs.semevosql.project.domain.SemanticProject;
 import cn.lgs.semevosql.project.domain.SemanticProjectRepository;
 import cn.lgs.semevosql.project.domain.SemanticProjectVersion;
-import cn.lgs.semevosql.project.security.ProjectAccessRole;
-import cn.lgs.semevosql.project.security.ProjectAccessService;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.sql.Timestamp;
@@ -44,12 +42,12 @@ public class ProjectHealthApplicationService {
 
 	private final ProjectVersionCatalogReadiness catalogReadiness;
 
-	private final ProjectAccessService projectAccessService;
+	private final ProjectScopeService projectScope;
 
 	private final JdbcTemplate jdbc;
 
 	public ProjectHealthView getHealth(Long projectId, OperatorContext operator) {
-		projectAccessService.requireAccess(projectId, operator, ProjectAccessRole.VIEWER);
+		projectScope.requireProject(projectId, operator);
 		SemanticProject project = repository.findProject(projectId)
 			.orElseThrow(() -> new IllegalArgumentException("Project not found: " + projectId));
 		SemanticProjectVersion activeVersion = project.getActiveVersionId() == null ? null
@@ -68,18 +66,15 @@ public class ProjectHealthApplicationService {
 	}
 
 	public ProjectHealthSummaryView getSummary(Long projectId, OperatorContext operator) {
-		ProjectAccessRole accessRole = projectAccessService.requireAccess(projectId, operator, ProjectAccessRole.VIEWER);
-		boolean globalAdmin = projectAccessService.isGlobalAdmin(operator);
+		projectScope.requireProject(projectId, operator);
 		try {
 			ProjectHealthView health = getHealth(projectId, operator);
 			NextAction nextAction = health.nextActions().isEmpty() ? null : health.nextActions().get(0);
 			return new ProjectHealthSummaryView(projectId, true, health.queryReady(), health.activeVersion(), nextAction,
-					health.quality().totalQueries(), health.quality().querySuccessRate(), health.quality().correctionCount(),
-					accessRole.name(), globalAdmin);
+					health.quality().totalQueries(), health.quality().querySuccessRate(), health.quality().correctionCount());
 		}
 		catch (RuntimeException ex) {
-			return new ProjectHealthSummaryView(projectId, false, false, null, null, 0, BigDecimal.ZERO, 0,
-					accessRole.name(), globalAdmin);
+			return new ProjectHealthSummaryView(projectId, false, false, null, null, 0, BigDecimal.ZERO, 0);
 		}
 	}
 
@@ -288,7 +283,7 @@ public class ProjectHealthApplicationService {
 
 	public record ProjectHealthSummaryView(Long projectId, boolean available, boolean queryReady,
 			VersionHealth activeVersion, NextAction nextAction, long totalQueries, BigDecimal querySuccessRate,
-			long correctionCount, String accessRole, boolean globalAdmin) {
+			long correctionCount) {
 	}
 
 	public record VersionHealth(Long id, String versionNumber, String status, LocalDateTime createTime,

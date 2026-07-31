@@ -41,7 +41,7 @@
   }>();
 
   const TERMINAL_FAILURES = new Set(['FAILED', 'CANCELLED', 'EXPIRED']);
-  const labels = ['理解问题', '确认语义与计划', '查询数据', '整理结果'];
+  const labels = ['理解需求', '确认业务口径', '生成并执行查询', '整理结果'];
   const isFailed = computed(() => TERMINAL_FAILURES.has(props.run.status));
 
   const stageIndex = computed(() => {
@@ -71,17 +71,17 @@
   const headline = computed(() => {
     if (props.run.status === 'SUCCEEDED') return '查询已完成';
     if (TERMINAL_FAILURES.has(props.run.status)) return '查询未完成';
-    if (props.needsAction || props.run.status === 'WAITING_HUMAN') return '查询正在等待你的确认';
+    if (props.needsAction || props.run.status === 'WAITING_HUMAN') return '等待你确认业务口径';
     return `正在${labels[Math.min(stageIndex.value, labels.length - 1)]}`;
   });
 
   const detail = computed(() => {
     if (props.transportNotice) return props.transportNotice;
-    if (props.run.status === 'SUCCEEDED') return '结果和执行证据已经保存，可以随时重新打开。';
+    if (props.run.status === 'SUCCEEDED') return '结果和执行依据已经保存，可以随时重新打开。';
     if (TERMINAL_FAILURES.has(props.run.status))
       return props.run.errorMessage || '可以查看运行详情后重试。';
     if (props.needsAction || props.run.status === 'WAITING_HUMAN')
-      return '确认完成后会从当前 Durable Run 继续，不会重新开始整条查询。';
+      return '确认后会从当前执行继续，不会重新开始整条查询。';
     return '页面断开不会取消后台执行，重新连接后会继续同步进度。';
   });
 </script>
@@ -90,9 +90,9 @@
   .run-progress {
     margin: 0 22px 10px;
     padding: 12px 14px;
-    border: 1px solid #dbeafe;
+    border: 1px solid #cfe7e2;
     border-radius: 12px;
-    background: #f8fbff;
+    background: #f3fbf8;
   }
   .run-progress.failed {
     border-color: #fecaca;
@@ -113,11 +113,11 @@
     gap: 3px;
   }
   .progress-heading strong {
-    color: #1e3a8a;
+    color: #177d73;
     font-size: 12px;
   }
   .progress-heading span {
-    color: #64748b;
+    color: #71858b;
     font-size: 11px;
   }
   .progress-stages {
@@ -137,11 +137,11 @@
     font-size: 11px;
   }
   .progress-stages li.current {
-    color: #1d4ed8;
+    color: #177d73;
     font-weight: 650;
   }
   .progress-stages li.done {
-    color: #475569;
+    color: #4d6870;
   }
   .stage-dot {
     display: grid;
@@ -156,11 +156,11 @@
     font-weight: 700;
   }
   .done .stage-dot {
-    background: #dcfce7;
-    color: #15803d;
+    background: #e5f6ee;
+    color: #2b896d;
   }
   .current .stage-dot {
-    background: #2563eb;
+    background: #177d73;
     color: #fff;
   }
   @media (max-width: 680px) {

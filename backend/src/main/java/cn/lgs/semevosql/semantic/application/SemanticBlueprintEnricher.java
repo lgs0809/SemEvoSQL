@@ -132,6 +132,7 @@ public class SemanticBlueprintEnricher {
 		boolean rowLevelRanking = rowLevelRanking(normalized);
 		List<SemanticBlueprint.DimensionSelection> selectedDimensions = dimensions.stream()
 			.filter(dimension -> !metricBackedScalarDimension(normalized, dimension, metrics))
+			.filter(dimension -> !bucketedTimeAxisDimension(hints.timeBinding(), dimension))
 			.toList();
 		for (SemanticBlueprint.DimensionSelection dimension : selectedDimensions) {
 			SemanticCatalogSnapshot.Column column = columns
@@ -806,6 +807,13 @@ public class SemanticBlueprintEnricher {
 			return "COUNT(DISTINCT " + expression + ")";
 		}
 		return aggregation + "(" + expression + ")";
+	}
+
+	static boolean bucketedTimeAxisDimension(QueryCaseHints.TimeBindingHint timeBinding,
+			SemanticBlueprint.DimensionSelection dimension) {
+		return timeBinding != null && StringUtils.hasText(timeBinding.groupGranularity())
+				&& Objects.equals(timeBinding.modelCode(), dimension.getModelCode())
+				&& Objects.equals(timeBinding.columnName(), dimension.getColumnName());
 	}
 
 	private boolean metricBackedScalarDimension(String query, SemanticBlueprint.DimensionSelection dimension,

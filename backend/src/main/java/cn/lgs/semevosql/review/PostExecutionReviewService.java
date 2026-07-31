@@ -64,6 +64,13 @@ public class PostExecutionReviewService {
 	public PostExecutionReview review(String question, SemanticBlueprint plan, String sql, ResultSetBO resultSet,
 			int configuredMaxRows, String executionPlan, ReviewMode mode, ValidationMode validationMode,
 			List<String> contextualWarnings) {
+		return review(question, plan, sql, resultSet, configuredMaxRows, executionPlan, mode, validationMode,
+				contextualWarnings, null);
+	}
+
+	public PostExecutionReview review(String question, SemanticBlueprint plan, String sql, ResultSetBO resultSet,
+			int configuredMaxRows, String executionPlan, ReviewMode mode, ValidationMode validationMode,
+			List<String> contextualWarnings, Long runDeadlineEpochMillis) {
 		ValidationResult deterministic = resultValidator.validate(resultSet, plan, configuredMaxRows, validationMode);
 		List<String> warnings = new ArrayList<>(deterministic.warnings());
 		if (contextualWarnings != null) {
@@ -82,8 +89,11 @@ public class PostExecutionReviewService {
 			return preliminary;
 		}
 		try {
-			PostExecutionReview reviewed = semanticReviewer.review(question, plan, sql, resultSet, executionPlan,
-					deterministic.errors(), warnings, validationMode == ValidationMode.ADVANCED_EXECUTION);
+			PostExecutionReview reviewed = runDeadlineEpochMillis == null
+					? semanticReviewer.review(question, plan, sql, resultSet, executionPlan, deterministic.errors(), warnings,
+							validationMode == ValidationMode.ADVANCED_EXECUTION)
+					: semanticReviewer.review(question, plan, sql, resultSet, executionPlan, deterministic.errors(), warnings,
+							validationMode == ValidationMode.ADVANCED_EXECUTION, runDeadlineEpochMillis);
 			PostExecutionReview normalized = normalize(reviewed, deterministic, warnings, validationMode, question,
 					executionPlan, sql);
 			return normalizeGovernedEmptyMerge(normalized, deterministic, warnings, plan, resultSet);

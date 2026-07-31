@@ -24,7 +24,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import cn.lgs.semevosql.common.OperatorAuthorizationService;
+import cn.lgs.semevosql.common.LocalOperatorService;
 import cn.lgs.semevosql.common.OperatorContext;
 import cn.lgs.semevosql.operations.SemEvoSQLProductionService.CanaryRequest;
 import java.util.List;
@@ -78,7 +78,7 @@ class ControlledReleaseServiceTest {
 	}
 
 	private ControlledReleaseService service(JdbcTemplate jdbc, SemanticCatalogCache cache) {
-		return new ControlledReleaseService(jdbc, cache, new OperatorAuthorizationService());
+		return new ControlledReleaseService(jdbc, cache, new LocalOperatorService());
 	}
 
 	private OperatorContext operator() {

@@ -13,22 +13,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package cn.lgs.semevosql.common;
+package cn.lgs.semevosql.exception;
 
-import lombok.Data;
-import org.springframework.boot.context.properties.ConfigurationProperties;
+import cn.lgs.semevosql.vo.ApiErrorCode;
 
-/** Security switch and JWT claim mapping for the SemEvoSQL HTTP boundary. */
-@Data
-@ConfigurationProperties(prefix = "semevosql.security")
-public class SemEvoSQLSecurityProperties {
+/** The model returned content that cannot be consumed by a governed parser. */
+public class ModelOutputInvalidException extends SemEvoSQLException {
 
-	private boolean enabled = false;
-
-	private String principalClaim = "sub";
-
-	private String roleClaim = "roles";
-
-	private String authorityPrefix = "ROLE_SEMEVOSQL_";
-
+	public ModelOutputInvalidException(String publicMessage, Throwable cause) {
+		super(ApiErrorCode.MODEL_OUTPUT_INVALID, publicMessage, true, cause);
+	}
 }

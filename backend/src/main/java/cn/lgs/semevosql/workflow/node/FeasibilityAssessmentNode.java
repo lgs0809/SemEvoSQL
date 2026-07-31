@@ -26,6 +26,7 @@ import com.alibaba.cloud.ai.graph.streaming.StreamingOutput;
 import cn.lgs.semevosql.prompt.PromptHelper;
 import cn.lgs.semevosql.service.llm.LlmService;
 import cn.lgs.semevosql.util.FluxUtil;
+import cn.lgs.semevosql.run.RunDeadlineUtil;
 import cn.lgs.semevosql.util.StateUtil;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -66,7 +67,7 @@ public class FeasibilityAssessmentNode implements NodeAction {
 		log.debug("Built feasibility assessment prompt as follows \n {} \n", prompt);
 
 		// 调用LLM进行可行性评估
-		Flux<ChatResponse> responseFlux = llmService.callUser(prompt);
+		Flux<ChatResponse> responseFlux = llmService.callUserWithin(prompt, RunDeadlineUtil.remaining(state));
 
 		Flux<GraphResponse<StreamingOutput>> generator = FluxUtil.createStreamingGeneratorWithMessages(this.getClass(),
 				state, "正在进行可行性评估...", "可行性评估完成！", llmOutput -> {

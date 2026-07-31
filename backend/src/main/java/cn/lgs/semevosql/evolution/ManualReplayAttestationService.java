@@ -15,9 +15,8 @@
  */
 package cn.lgs.semevosql.evolution;
 
-import cn.lgs.semevosql.common.OperatorAuthorizationService;
+import cn.lgs.semevosql.common.LocalOperatorService;
 import cn.lgs.semevosql.common.OperatorContext;
-import cn.lgs.semevosql.common.OperatorRole;
 import cn.lgs.semevosql.common.json.CanonicalJson;
 import cn.lgs.semevosql.util.JsonUtil;
 import java.util.LinkedHashMap;
@@ -44,12 +43,12 @@ public class ManualReplayAttestationService {
 
 	private final SemanticEvolutionAuditService auditService;
 
-	private final OperatorAuthorizationService authorization;
+	private final LocalOperatorService authorization;
 
 	private final CanonicalJson canonicalJson = new CanonicalJson();
 
 	public ManualReplayAttestationService(JdbcTemplate jdbc, SemanticEvolutionAuditService auditService,
-			OperatorAuthorizationService authorization) {
+			LocalOperatorService authorization) {
 		this.jdbc = jdbc;
 		this.auditService = auditService;
 		this.authorization = authorization;
@@ -60,7 +59,7 @@ public class ManualReplayAttestationService {
 		if (!StringUtils.hasText(candidateId) || command == null || operator == null) {
 			throw new IllegalArgumentException("candidateId, command and operator are required");
 		}
-		authorization.requireAtLeast(operator, OperatorRole.PUBLISHER, "create manual Replay attestation");
+		authorization.require(operator, "create manual Replay attestation");
 		Map<String, Object> candidate = one("""
 				SELECT * FROM qw_semantic_evolution_candidate WHERE id = ? FOR UPDATE
 				""", candidateId);

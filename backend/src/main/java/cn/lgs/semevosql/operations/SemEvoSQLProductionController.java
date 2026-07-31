@@ -15,9 +15,8 @@
  */
 package cn.lgs.semevosql.operations;
 
-import cn.lgs.semevosql.common.OperatorAuthorizationService;
+import cn.lgs.semevosql.common.LocalOperatorService;
 import cn.lgs.semevosql.common.OperatorContext;
-import cn.lgs.semevosql.common.OperatorRole;
 import cn.lgs.semevosql.learning.QueryCaseRetrievalIndexService;
 import cn.lgs.semevosql.learning.QueryCaseRetrievalIndexService.QueryCaseIndexReadiness;
 import cn.lgs.semevosql.operations.SemEvoSQLProductionService.CanaryRequest;
@@ -34,7 +33,7 @@ import cn.lgs.semevosql.operations.SemEvoSQLProductionService.ReleaseRequest;
 import cn.lgs.semevosql.operations.SemEvoSQLProductionService.ShadowResult;
 import cn.lgs.semevosql.operations.SemEvoSQLProductionService.SqlTraceRequest;
 import cn.lgs.semevosql.operations.SemEvoSQLProductionService.TraceRequest;
-import cn.lgs.semevosql.run.RuntimeMutationAuthorizationService;
+import cn.lgs.semevosql.run.RuntimeMutationScopeService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -64,9 +63,9 @@ public class SemEvoSQLProductionController {
 
 	private final OperatorContext.Resolver operatorResolver;
 
-	private final OperatorAuthorizationService authorization;
+	private final LocalOperatorService authorization;
 
-	private final RuntimeMutationAuthorizationService runtimeMutationAuthorizationService;
+	private final RuntimeMutationScopeService runtimeMutationScope;
 
 	private final ProjectRuntimeGate projectRuntimeGate;
 
@@ -79,7 +78,7 @@ public class SemEvoSQLProductionController {
 	@PostMapping("/episodes")
 	public Map<String, Object> createEpisode(@RequestBody EpisodeRequest request, @RequestHeader HttpHeaders headers,
 			Principal principal) {
-		require(headers, principal, "operations-episode-create", OperatorRole.ADMIN);
+		require(headers, principal, "operations-episode-create");
 		return service.createEpisode(request);
 	}
 
@@ -92,36 +91,36 @@ public class SemEvoSQLProductionController {
 	@PostMapping("/episodes/{episodeId}/attempts/{attemptNo}")
 	public Map<String, Object> createAttempt(@PathVariable String episodeId, @PathVariable int attemptNo,
 			@RequestHeader HttpHeaders headers, Principal principal) {
-		require(headers, principal, "operations-attempt-create:" + episodeId, OperatorRole.ADMIN);
+		require(headers, principal, "operations-attempt-create:" + episodeId);
 		return service.createAttempt(episodeId, attemptNo);
 	}
 
 	@PostMapping("/attempts/{attemptId}/node-traces")
 	public Map<String, Object> nodeTrace(@PathVariable String attemptId, @RequestBody TraceRequest request,
 			@RequestHeader HttpHeaders headers, Principal principal) {
-		require(headers, principal, "operations-node-trace:" + attemptId, OperatorRole.ADMIN);
+		require(headers, principal, "operations-node-trace:" + attemptId);
 		return service.recordNodeTrace(attemptId, request);
 	}
 
 	@PostMapping("/attempts/{attemptId}/sql-traces")
 	public Map<String, Object> sqlTrace(@PathVariable String attemptId, @RequestBody SqlTraceRequest request,
 			@RequestHeader HttpHeaders headers, Principal principal) {
-		require(headers, principal, "operations-sql-trace:" + attemptId, OperatorRole.ADMIN);
+		require(headers, principal, "operations-sql-trace:" + attemptId);
 		return service.recordSqlTrace(attemptId, request);
 	}
 
 	@PostMapping("/episodes/{episodeId}/complete")
 	public Map<String, Object> complete(@PathVariable String episodeId, @RequestBody CompletionRequest request,
 			@RequestHeader HttpHeaders headers, Principal principal) {
-		require(headers, principal, "operations-episode-complete:" + episodeId, OperatorRole.ADMIN);
+		require(headers, principal, "operations-episode-complete:" + episodeId);
 		return service.completeEpisode(episodeId, request);
 	}
 
 	@PostMapping("/episodes/{episodeId}/feedback")
 	public Map<String, Object> feedback(@PathVariable String episodeId, @RequestBody FeedbackRequest request,
 			@RequestHeader HttpHeaders headers, Principal principal) {
-		OperatorContext operator = require(headers, principal, "operations-feedback:" + episodeId, OperatorRole.VIEWER);
-		runtimeMutationAuthorizationService.requireEpisodeOwnerOrAdmin(episodeId, operator);
+		OperatorContext operator = require(headers, principal, "operations-feedback:" + episodeId);
+		runtimeMutationScope.requireEpisode(episodeId, operator);
 		return service.feedback(episodeId,
 				new FeedbackRequest(operator.operator(), request.rating(), request.adopted(), request.comment()));
 	}
@@ -129,7 +128,7 @@ public class SemEvoSQLProductionController {
 	@PostMapping("/projects/{projectId}/golden-cases")
 	public Map<String, Object> goldenCase(@PathVariable Long projectId, @RequestBody GoldenCaseRequest request,
 			@RequestHeader HttpHeaders headers, Principal principal) {
-		require(headers, principal, "operations-golden-case:" + projectId, OperatorRole.REVIEWER);
+		require(headers, principal, "operations-golden-case:" + projectId);
 		return service.createGoldenCase(projectId, request);
 	}
 
@@ -141,7 +140,7 @@ public class SemEvoSQLProductionController {
 	@PostMapping("/projects/{projectId}/jobs")
 	public Map<String, Object> createJob(@PathVariable Long projectId, @RequestBody JobRequest request,
 			@RequestHeader HttpHeaders headers, Principal principal) {
-		require(headers, principal, "operations-job-create:" + projectId, OperatorRole.EDITOR);
+		require(headers, principal, "operations-job-create:" + projectId);
 		return service.createJob(projectId, request);
 	}
 
@@ -159,14 +158,14 @@ public class SemEvoSQLProductionController {
 	@PostMapping("/jobs/{jobId}/retry")
 	public Map<String, Object> retryJob(@PathVariable String jobId, @RequestHeader HttpHeaders headers,
 			Principal principal) {
-		require(headers, principal, "operations-job-retry:" + jobId, OperatorRole.EDITOR);
+		require(headers, principal, "operations-job-retry:" + jobId);
 		return service.retryJob(jobId);
 	}
 
 	@PostMapping("/jobs/{jobId}/cancel")
 	public Map<String, Object> cancelJob(@PathVariable String jobId, @RequestHeader HttpHeaders headers,
 			Principal principal) {
-		require(headers, principal, "operations-job-cancel:" + jobId, OperatorRole.EDITOR);
+		require(headers, principal, "operations-job-cancel:" + jobId);
 		return service.cancelJob(jobId);
 	}
 
@@ -174,14 +173,14 @@ public class SemEvoSQLProductionController {
 	public Map<String, Object> release(@PathVariable Long projectId, @RequestBody ReleaseRequest request,
 			@RequestHeader HttpHeaders headers, Principal principal) {
 		return service.createRelease(projectId, request,
-				require(headers, principal, "release-create:" + projectId, OperatorRole.PUBLISHER));
+				require(headers, principal, "release-create:" + projectId));
 	}
 
 	@PostMapping("/releases/{releaseId}/shadow-results")
 	public Map<String, Object> shadow(@PathVariable String releaseId, @RequestBody ShadowResult request,
 			@RequestHeader HttpHeaders headers, Principal principal) {
 		return service.recordShadow(releaseId, request,
-				require(headers, principal, "release-shadow:" + releaseId, OperatorRole.PUBLISHER));
+				require(headers, principal, "release-shadow:" + releaseId));
 	}
 
 	@GetMapping("/projects/{projectId}/releases")
@@ -198,14 +197,14 @@ public class SemEvoSQLProductionController {
 	public Map<String, Object> canary(@PathVariable String releaseId, @RequestBody CanaryRequest request,
 			@RequestHeader HttpHeaders headers, Principal principal) {
 		return service.advanceCanary(releaseId, request,
-				require(headers, principal, "release-canary:" + releaseId, OperatorRole.PUBLISHER));
+				require(headers, principal, "release-canary:" + releaseId));
 	}
 
 	@PostMapping("/releases/{releaseId}/rollback")
 	public Map<String, Object> rollback(@PathVariable String releaseId, @Valid @RequestBody RollbackRequest request,
 			@RequestHeader HttpHeaders headers, Principal principal) {
 		return service.rollback(releaseId, request.reason(),
-				require(headers, principal, "release-rollback:" + releaseId, OperatorRole.PUBLISHER));
+				require(headers, principal, "release-rollback:" + releaseId));
 	}
 
 	@GetMapping("/projects/{projectId}/dashboard")
@@ -222,7 +221,7 @@ public class SemEvoSQLProductionController {
 
 	@PostMapping("/semantic-index/reindex")
 	public Mono<Map<String, Object>> reindexSemanticIndex(@RequestHeader HttpHeaders headers, Principal principal) {
-		require(headers, principal, "semantic-index-reindex", OperatorRole.ADMIN);
+		require(headers, principal, "semantic-index-reindex");
 		return Mono.fromCallable(() -> Map.<String, Object>of("indexedEmbeddings",
 				semanticRetrievalIndexService.reindexAll())).subscribeOn(Schedulers.boundedElastic());
 	}
@@ -230,7 +229,7 @@ public class SemEvoSQLProductionController {
 	@PostMapping("/projects/{projectId}/versions/{versionId}/semantic-index/reindex")
 	public Mono<Map<String, Object>> reindexSemanticIndexVersion(@PathVariable Long projectId,
 			@PathVariable Long versionId, @RequestHeader HttpHeaders headers, Principal principal) {
-		require(headers, principal, "semantic-index-reindex:" + projectId + ":" + versionId, OperatorRole.ADMIN);
+		require(headers, principal, "semantic-index-reindex:" + projectId + ":" + versionId);
 		return Mono.fromCallable(() -> {
 			var result = semanticRetrievalDocumentBuildService.reindexEmbeddings(projectId, versionId);
 			return Map.<String, Object>of("indexedEmbeddings", result.indexedDocuments(), "vectorAvailable",
@@ -246,7 +245,7 @@ public class SemEvoSQLProductionController {
 	@PostMapping("/query-case-index/reindex")
 	public Mono<Map<String, Object>> reindexQueryCaseIndex(@RequestParam(required = false) Long projectId,
 			@RequestHeader HttpHeaders headers, Principal principal) {
-		require(headers, principal, "query-case-index-reindex", OperatorRole.ADMIN);
+		require(headers, principal, "query-case-index-reindex");
 		return Mono.fromCallable(() -> Map.<String, Object>of("indexedEmbeddings",
 				queryCaseRetrievalIndexService.reindexApprovedCases(projectId), "projectId", projectId == null ? "ALL" : projectId))
 			.subscribeOn(Schedulers.boundedElastic());
@@ -257,10 +256,9 @@ public class SemEvoSQLProductionController {
 		return service.cacheStats();
 	}
 
-	private OperatorContext require(HttpHeaders headers, Principal principal, String operation,
-			OperatorRole requiredRole) {
+	private OperatorContext require(HttpHeaders headers, Principal principal, String operation) {
 		OperatorContext operator = operatorResolver.resolve(headers, principal, operation);
-		authorization.requireAtLeast(operator, requiredRole, operation);
+		authorization.require(operator, operation);
 		return operator;
 	}
 

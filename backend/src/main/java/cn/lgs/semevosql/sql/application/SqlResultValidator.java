@@ -71,13 +71,19 @@ public class SqlResultValidator {
 	private void validateExpectedShape(List<String> columns, List<Map<String, String>> rows, SemanticBlueprint plan,
 			ValidationMode mode, List<String> errors, List<String> warnings) {
 		SemanticBlueprint.ExpectedResultShape expected = plan.getExpectedResult();
-		if (expected != null && mode == ValidationMode.STRICT_SEMANTIC_PLAN) {
-			for (String expectedColumn : safe(expected.getColumns())) {
-				if (hasText(expectedColumn) && findOutputColumn(columns, expectedColumn) == null) {
-					errors.add("Expected result column is missing: " + expectedColumn);
+		if (expected != null) {
+			// Expected columns are the minimum semantic output contract for every execution path. Advanced SQL may add
+			// planner-owned derived columns, but a non-empty result must not silently rename/drop governed outputs that
+			// downstream review, learning and report generation use to prove semantic alignment.
+			if (mode == ValidationMode.STRICT_SEMANTIC_PLAN || !rows.isEmpty()) {
+				for (String expectedColumn : safe(expected.getColumns())) {
+					if (hasText(expectedColumn) && findOutputColumn(columns, expectedColumn) == null) {
+						errors.add("Expected result column is missing: " + expectedColumn);
+					}
 				}
 			}
-			if (expected.getMaxRows() != null && expected.getMaxRows() > 0 && rows.size() > expected.getMaxRows()) {
+			if (mode == ValidationMode.STRICT_SEMANTIC_PLAN && expected.getMaxRows() != null && expected.getMaxRows() > 0
+					&& rows.size() > expected.getMaxRows()) {
 				errors.add("Result row count exceeds typed-plan expected maximum: " + expected.getMaxRows());
 			}
 		}

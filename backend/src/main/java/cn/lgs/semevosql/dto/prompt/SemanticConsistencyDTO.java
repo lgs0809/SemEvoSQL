@@ -40,4 +40,7 @@ public class SemanticConsistencyDTO {
 
 	private String evidence;
 
+	/** Absolute interactive Run deadline; null keeps this DTO compatible with non-Graph callers. */
+	private Long runDeadlineEpochMillis;
+
 }

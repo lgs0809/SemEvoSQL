@@ -16,28 +16,28 @@
     <template v-if="health">
       <section class="status-grid">
         <article class="status-card primary">
-          <span>现在能不能问？</span>
-          <strong>{{ health.queryReady ? '可以问数' : '还在准备' }}</strong>
+          <span>查询入口</span>
+          <strong>{{ health.queryReady ? '已就绪' : '待发布模型' }}</strong>
           <p>
             {{
               health.queryReady
-                ? `正式业务模型 v${health.activeVersion?.versionNumber || '-'} 已激活`
-                : '需要先完成业务理解、验证并发布正式版本'
+                ? `正式业务模型 v${health.activeVersion?.versionNumber || '-'} 已激活，可直接创建查询会话`
+                : '完成业务理解、验证并发布正式版本后开放查询入口'
             }}
           </p>
         </article>
         <article class="status-card">
-          <span>系统理解业务到什么程度？</span>
+          <span>业务模型状态</span>
           <strong>{{ understandingLabel }}</strong>
           <p>{{ understandingDetail }}</p>
         </article>
         <article class="status-card">
-          <span>最近回答质量是否正常？</span>
+          <span>查询质量</span>
           <strong>{{ qualityLabel }}</strong>
           <p>{{ qualityDetail }}</p>
         </article>
         <article class="status-card">
-          <span>当前数据是否新鲜？</span>
+          <span>数据时效</span>
           <strong>{{ freshnessLabel }}</strong>
           <p>{{ freshnessDetail }}</p>
         </article>
@@ -46,9 +46,9 @@
       <section class="overview-section">
         <div class="section-heading">
           <div>
-            <h2>近期问数质量</h2>
+            <h2>查询质量</h2>
             <p>
-              最近 {{ health.quality.windowDays }} 天的真实执行与用户反馈事实，不做 AI 主观打分。
+              最近 {{ health.quality.windowDays }} 天的真实执行与用户反馈事实，不做模型主观打分。
             </p>
           </div>
           <el-button v-if="props.canReview" link type="primary" @click="emit('navigate', 'test')">
@@ -95,7 +95,7 @@
         <div class="fact-panel">
           <div class="section-heading compact">
             <div>
-              <h2>业务理解</h2>
+            <h2>业务模型</h2>
               <p>当前工作版本 v{{ health.workingVersion?.versionNumber || '-' }}</p>
             </div>
             <el-button
@@ -152,7 +152,7 @@
         <div class="fact-panel">
           <div class="section-heading compact">
             <div>
-              <h2>发布与回归</h2>
+            <h2>版本与回归</h2>
               <p>自动回归结果与人工确认、发布决策保持独立。</p>
             </div>
             <el-button
@@ -196,8 +196,8 @@
       <section class="overview-section actions-section">
         <div class="section-heading">
           <div>
-            <h2>下一步</h2>
-            <p>只根据当前项目事实生成，最多展示 3 个最需要处理的动作。</p>
+            <h2>接下来做什么</h2>
+            <p>这里展示当前项目最重要的动作，完成后会自动刷新状态。</p>
           </div>
         </div>
         <div v-if="visibleNextActions.length" class="next-actions">
@@ -220,7 +220,7 @@
           type="info"
           show-icon
           :closable="false"
-          title="当前待办需要项目建设者继续处理；你仍可以查看项目状态和已有问数结果。"
+          title="当前待办需要项目建设者继续处理；你仍可以查看项目状态和已有查询结果。"
         />
       </section>
     </template>
@@ -262,9 +262,9 @@
   const understandingLabel = computed(() => {
     if (!props.health) return '-';
     if (props.health.understanding.catalogReady && props.health.understanding.openGapCount === 0)
-      return '关键口径已齐备';
+      return '口径已齐备';
     if (props.health.understanding.openGapCount > 0) return '仍需业务确认';
-    return '仍有发布前校验项';
+    return '还有发布前校验';
   });
   const understandingDetail = computed(() => {
     if (!props.health) return '';
@@ -278,7 +278,7 @@
   });
   const qualityDetail = computed(() => {
     const quality = props.health?.quality;
-    if (!quality || quality.totalQueries === 0) return '完成首次问数后开始积累真实质量事实';
+    if (!quality || quality.totalQueries === 0) return '完成第一次查询后开始积累真实质量事实';
     return `${quality.totalQueries} 次查询 · ${quality.correctionCount} 次明确纠错 · ${quality.confirmedTrustedAnswerCount} 次明确确认`;
   });
   const freshnessLabel = computed(() => {
@@ -310,28 +310,28 @@
   }
   .status-card {
     padding: 18px;
-    border: 1px solid #e2e8f0;
+    border: 1px solid #dce7e7;
     border-radius: 14px;
     background: #fff;
   }
   .status-card.primary {
-    border-color: #bfdbfe;
-    background: #f8fbff;
+    border-color: #b9e1d9;
+    background: #f2fbf8;
   }
   .status-card span,
   .metric-item span {
-    color: #64748b;
+    color: #71858b;
     font-size: 12px;
   }
   .status-card strong {
     display: block;
     margin-top: 8px;
-    color: #0f172a;
+    color: #17353b;
     font-size: 20px;
   }
   .status-card p {
     margin: 7px 0 0;
-    color: #64748b;
+    color: #71858b;
     font-size: 12px;
     line-height: 1.55;
   }
@@ -369,22 +369,22 @@
     display: grid;
     gap: 5px;
     padding: 14px;
-    border: 1px solid #e2e8f0;
+    border: 1px solid #e1e9ea;
     border-radius: 12px;
-    background: #fbfdff;
+    background: #fcfefe;
   }
   .metric-item.north-star {
-    border-color: #bfdbfe;
+    border-color: #b9e1d9;
   }
   .metric-item.trusted {
-    border-color: #bbf7d0;
+    border-color: #bfe5d4;
   }
   .metric-item strong {
-    color: #0f172a;
+    color: #17353b;
     font-size: 20px;
   }
   .metric-item small {
-    color: #64748b;
+    color: #71858b;
     line-height: 1.45;
   }
   .two-column {
@@ -394,7 +394,7 @@
   }
   .fact-panel {
     padding: 18px;
-    border: 1px solid #e2e8f0;
+    border: 1px solid #dce7e7;
     border-radius: 14px;
   }
   .fact-list {
@@ -409,12 +409,12 @@
     gap: 4px;
   }
   dt {
-    color: #64748b;
+    color: #71858b;
     font-size: 11px;
   }
   dd {
     margin: 0;
-    color: #0f172a;
+    color: #17353b;
     font-weight: 650;
   }
   .release-list {
@@ -433,14 +433,15 @@
     gap: 12px;
     min-height: 78px;
     padding: 14px;
-    border: 1px solid #dbeafe;
+    border: 1px solid #dce7e7;
     border-radius: 12px;
     background: #fff;
     text-align: left;
     cursor: pointer;
   }
   .next-actions button:hover {
-    background: #f8fbff;
+    border-color: #afd8d0;
+    background: #f2fbf8;
   }
   .action-index {
     display: grid;
@@ -449,8 +450,8 @@
     flex: 0 0 auto;
     place-items: center;
     border-radius: 50%;
-    background: #eff6ff;
-    color: #2563eb;
+    background: #e4f5f1;
+    color: #177d73;
     font-weight: 700;
   }
   .action-copy {
@@ -459,10 +460,10 @@
     gap: 4px;
   }
   .action-copy strong {
-    color: #0f172a;
+    color: #17353b;
   }
   .action-copy small {
-    color: #64748b;
+    color: #71858b;
     line-height: 1.45;
   }
   @media (max-width: 1000px) {

@@ -42,7 +42,7 @@ export const projectLifecycleStages = (health?: ProjectHealth): ProjectLifecycle
     {
       id: 'data',
       label: '连接数据',
-      description: '选择参与问数的数据连接与业务表',
+      description: '选择供查询使用的数据连接与业务表',
     },
     {
       id: 'understanding',
@@ -66,7 +66,7 @@ export const projectLifecycleStages = (health?: ProjectHealth): ProjectLifecycle
     },
     {
       id: 'chat',
-      label: '开始问数',
+      label: '打开查询工作台',
       description: '使用发布版本进行可追溯业务查询',
     },
   ];

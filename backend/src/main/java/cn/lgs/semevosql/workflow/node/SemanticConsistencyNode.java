@@ -28,6 +28,9 @@ import cn.lgs.semevosql.review.QueryRepairPolicy;
 import cn.lgs.semevosql.review.QueryRepairPolicy.BudgetDecision;
 import cn.lgs.semevosql.review.QueryRepairPolicy.RepairBudget;
 import cn.lgs.semevosql.run.QueryRunService;
+import cn.lgs.semevosql.run.LateRunResultDroppedException;
+import cn.lgs.semevosql.run.RunDeadlineExceededException;
+import cn.lgs.semevosql.run.RunExecutionFenceService;
 import cn.lgs.semevosql.semantic.compiler.QueryPreflightException;
 import cn.lgs.semevosql.semantic.compiler.QueryPreflightService;
 import cn.lgs.semevosql.semantic.compiler.QueryPreflightService.PreflightResult;
@@ -74,6 +77,8 @@ public class SemanticConsistencyNode implements NodeAction {
 	private final QueryRepairPolicy repairPolicy;
 
 	private final QueryRunService runService;
+
+	private final RunExecutionFenceService executionFence;
 
 	@Override
 	public Map<String, Object> apply(OverAllState state) throws Exception {
@@ -125,13 +130,15 @@ public class SemanticConsistencyNode implements NodeAction {
 		String executionDescription = getCurrentExecutionStepInstruction(state);
 		SemanticConsistencyDTO semanticConsistencyDTO = SemanticConsistencyDTO.builder()
 			.dialect(dialect)
-			.sql(physicalSql)
+			.sql(consistencyReviewSql(compilerMode, semanticSql, physicalSql))
 			.executionDescription(executionDescription)
 			.schemaInfo(buildMixMacSqlDbPrompt(schemaDTO, true))
 			.semanticModel(semanticModel)
 			.semanticPlan(serializeSemanticPlan(semanticPlan, advancedExecution))
 			.userQuery(userQuery)
 			.evidence(evidence)
+			.runDeadlineEpochMillis(StateUtil.getObjectValue(state,
+					cn.lgs.semevosql.constant.Constant.RUN_DEADLINE_EPOCH_MILLIS, Long.class, (Long) null))
 			.build();
 		log.info("Starting semantic consistency validation - Semantic SQL: {}", semanticSql);
 
@@ -178,6 +185,13 @@ public class SemanticConsistencyNode implements NodeAction {
 		return Map.of(SEMANTIC_CONSISTENCY_NODE_OUTPUT, generator);
 	}
 
+	static String consistencyReviewSql(String compilerMode, String semanticSql, String physicalSql) {
+		// Query Preflight may inject system-owned model-materialization CTEs and supporting columns. Semantic
+		// consistency judges the model-authored query against the Blueprint; physical SQL is governed separately by
+		// Preflight/AST/safety/cost gates and must not be mistaken for model-authored field selection.
+		return "SEMANTIC_SQL".equalsIgnoreCase(compilerMode) ? semanticSql : physicalSql;
+	}
+
 	static List<String> advancedExecutionStructureErrors(String executionDescription, String semanticSql) {
 		String plan = executionDescription == null ? "" : executionDescription.toUpperCase(java.util.Locale.ROOT);
 		String sql = semanticSql == null ? "" : semanticSql.toUpperCase(java.util.Locale.ROOT);
@@ -202,8 +216,12 @@ public class SemanticConsistencyNode implements NodeAction {
 			return;
 		}
 		String runId = StateUtil.getStringValue(state, RUN_ID, "");
+		String attemptId = StateUtil.getStringValue(state, ATTEMPT_ID, "");
 		if (runId.isBlank()) {
 			return;
+		}
+		if (!attemptId.isBlank()) {
+			executionFence.assertActive(runId, attemptId);
 		}
 		try {
 			Map<String, Object> payload = new LinkedHashMap<>();
@@ -213,8 +231,11 @@ public class SemanticConsistencyNode implements NodeAction {
 			payload.put("dryPlan", preflightSummary == null ? Map.of() : preflightSummary);
 			String payloadJson = JsonUtil.getObjectMapper().writeValueAsString(payload);
 			String evidenceKey = Integer.toUnsignedString(Objects.hash(semanticSql, physicalSql, preflightSummary), 16);
-			runService.appendEvent(runId, "SEMANTIC_SQL_DRY_PLAN", "semantic-consistency", payloadJson,
+			runService.appendEvent(runId, attemptId, "SEMANTIC_SQL_DRY_PLAN", "semantic-consistency", payloadJson,
 					"Query Preflight evidence persisted", "semantic-sql-dry-plan:" + runId + ":" + evidenceKey);
+		}
+		catch (LateRunResultDroppedException | RunDeadlineExceededException ex) {
+			throw ex;
 		}
 		catch (RuntimeException ex) {
 			log.warn("Unable to persist Query Preflight evidence for run {}: {}", runId, ex.getMessage());

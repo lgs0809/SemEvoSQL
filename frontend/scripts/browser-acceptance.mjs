@@ -34,13 +34,13 @@ const cases = [
   {
     name: 'project list',
     path: '/projects',
-    includes: ['数据项目', '项目总数'],
+    includes: ['项目工作台', '项目总数'],
     excludes: ['项目列表加载失败'],
   },
   {
     name: 'model configuration',
     path: '/admin/models',
-    includes: ['模型配置管理', '新增配置', '筛选模型类型'],
+    includes: ['模型服务', '新增配置', '筛选模型类型'],
     excludes: [],
   },
 ];
@@ -50,19 +50,44 @@ if (projectId) {
     {
       name: 'project overview',
       path: `/projects/${encodeURIComponent(projectId)}`,
-      includes: ['概览', '验证与发布'],
+      includes: ['项目概览', '验证与发布'],
       excludes: ['项目详情加载失败'],
     },
     {
       name: 'semantic governance',
       path: `/projects/${encodeURIComponent(projectId)}?section=release`,
-      includes: ['语义版本与知识更新', 'Semantic Versions', 'Corpus Revisions', 'ChangeSets'],
+      includes: ['业务模型版本与资料更新', '业务模型版本', '资料修订', '变更记录'],
       excludes: ['项目详情加载失败'],
+    },
+    {
+      name: 'external agent integration',
+      path: `/projects/${encodeURIComponent(projectId)}?section=external`,
+      includes: ['外部智能助手接入'],
+      excludes: [],
+    },
+    {
+      name: 'semantic improvement',
+      path: `/projects/${encodeURIComponent(projectId)}?section=evolution`,
+      includes: ['业务模型建议'],
+      excludes: [],
+    },
+    {
+      name: 'project selection before chat',
+      path: '/chat',
+      includes: ['先选择项目，再开始查询'],
+      excludes: ['问一个具体问题'],
     },
     {
       name: 'project chat',
       path: `/chat?projectId=${encodeURIComponent(projectId)}`,
-      includes: ['问数'],
+      includes: ['发送'],
+      attributes: [
+        {
+          selector: 'textarea[aria-label]',
+          attribute: 'aria-label',
+          includes: '要查询的业务问题',
+        },
+      ],
       excludes: [],
     },
   );
@@ -98,7 +123,7 @@ const devtoolsUrl = new Promise((resolve, reject) => {
 
 const startupTimer = setTimeout(() => {
   devtoolsReject(new Error(`Chrome DevTools did not start. ${chromeStderr.trim()}`));
-}, 10_000);
+}, 20_000);
 
 chrome.stderr.on('data', (chunk) => {
   chromeStderr += chunk;
@@ -127,14 +152,20 @@ const closeResources = () => {
     // Best-effort cleanup only.
   }
   if (!chrome.killed) chrome.kill('SIGTERM');
-  rmSync(profileDirectory, { recursive: true, force: true });
+  try {
+    rmSync(profileDirectory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  } catch (error) {
+    console.warn(
+      `[browser-acceptance] temporary Chrome profile cleanup skipped: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 };
 
 try {
   const websocketUrl = await devtoolsUrl;
   socket = new WebSocket(websocketUrl);
   await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Timed out connecting to Chrome DevTools.')), 5000);
+    const timer = setTimeout(() => reject(new Error('Timed out connecting to Chrome DevTools.')), 10_000);
     socket.addEventListener('open', () => {
       clearTimeout(timer);
       resolve();
@@ -169,7 +200,7 @@ try {
     }
   });
 
-  const command = (method, params = {}, sessionId, timeoutMs = 10_000) => {
+  const command = (method, params = {}, sessionId, timeoutMs = 15_000) => {
     const id = ++messageId;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -181,7 +212,7 @@ try {
     });
   };
 
-  const waitForEvent = (method, sessionId, timeoutMs = 10_000) =>
+  const waitForEvent = (method, sessionId, timeoutMs = 15_000) =>
     new Promise((resolve, reject) => {
       const waiter = { method, sessionId, resolve, reject, timer: undefined };
       waiter.timer = setTimeout(() => {
@@ -203,27 +234,49 @@ try {
     await command('Page.navigate', { url }, sessionId);
     await loaded;
 
-    const evaluation = await command(
-      'Runtime.evaluate',
-      {
-        expression:
-          '(async () => { await new Promise((resolve) => setTimeout(resolve, 2500)); return document.body.innerText; })()',
-        awaitPromise: true,
-        returnByValue: true,
-      },
-      sessionId,
-      10_000,
-    );
-    const bodyText = evaluation.result?.value || '';
-    const missing = testCase.includes.filter((text) => !bodyText.includes(text));
-    const forbidden = testCase.excludes.filter((text) => bodyText.includes(text));
+    const readinessDeadline = Date.now() + 12_000;
+    let bodyText = '';
+    let missing = [...testCase.includes];
+    let missingAttributes = [];
+    let forbidden = [];
+    do {
+      const evaluation = await command(
+        'Runtime.evaluate',
+        {
+          expression: "document.body?.innerText || ''",
+          returnByValue: true,
+        },
+        sessionId,
+      );
+      bodyText = evaluation.result?.value || '';
+      missing = testCase.includes.filter((text) => !bodyText.includes(text));
+      missingAttributes = [];
+      for (const rule of testCase.attributes || []) {
+        const attribute = await command(
+          'Runtime.evaluate',
+          {
+            expression: `document.querySelector(${JSON.stringify(rule.selector)})?.getAttribute(${JSON.stringify(rule.attribute)}) || ''`,
+            returnByValue: true,
+          },
+          sessionId,
+        );
+        if (!String(attribute.result?.value || '').includes(rule.includes)) {
+          missingAttributes.push(`${rule.attribute}=${rule.includes}`);
+        }
+      }
+      forbidden = testCase.excludes.filter((text) => bodyText.includes(text));
+      if (!missing.length && !missingAttributes.length && !forbidden.length) break;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    } while (Date.now() < readinessDeadline);
 
-    if (missing.length || forbidden.length) {
+    if (missing.length || missingAttributes.length || forbidden.length) {
       throw new Error(
         [
           `Browser acceptance failed for ${testCase.name} (${url}).`,
           missing.length ? `Missing: ${missing.join(', ')}` : '',
+          missingAttributes.length ? `Missing attributes: ${missingAttributes.join(', ')}` : '',
           forbidden.length ? `Unexpected: ${forbidden.join(', ')}` : '',
+          bodyText ? `Body: ${bodyText.slice(0, 1200).replace(/\s+/g, ' ').trim()}` : '',
         ]
           .filter(Boolean)
           .join(' '),

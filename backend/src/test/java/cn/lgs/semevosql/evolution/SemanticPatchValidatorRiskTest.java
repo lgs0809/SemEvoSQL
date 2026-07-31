@@ -44,6 +44,25 @@ class SemanticPatchValidatorRiskTest {
         assertThat(validator.effectiveRiskLevel(patch, "HIGH")).isEqualTo("HIGH");
     }
 
+    @Test
+    void projectAliasUsesNaturalLanguageIdentityButKeepsStableTargetCode() {
+        Operation alias = new Operation(OperationType.ADD_PROJECT_ALIAS, "PROJECT_ALIAS", "按业务时间统计实付金额趋势", null,
+                Map.of("phrase", "按业务时间统计实付金额趋势", "targetAssetType", "DIMENSION", "targetAssetKey", "payment_time",
+                        "businessLabel", "支付时间"), List.of());
+
+        assertThat(validator.validAssetKey(alias)).isTrue();
+        assertThat(validator.validProjectAliasTarget(alias)).isTrue();
+    }
+
+    @Test
+    void projectAliasRejectsPunctuationOnlyIdentityAndSqlLikeTarget() {
+        Operation alias = new Operation(OperationType.ADD_PROJECT_ALIAS, "PROJECT_ALIAS", "--", null,
+                Map.of("targetAssetKey", "payment time;drop"), List.of());
+
+        assertThat(validator.validAssetKey(alias)).isFalse();
+        assertThat(validator.validProjectAliasTarget(alias)).isFalse();
+    }
+
     private SemanticPatch patch(OperationType operation, String assetType, String assetKey) {
         return new SemanticPatch(1, 1L, "hash",
                 List.of(new Operation(operation, assetType, assetKey, "fingerprint", Map.of(), List.of())));

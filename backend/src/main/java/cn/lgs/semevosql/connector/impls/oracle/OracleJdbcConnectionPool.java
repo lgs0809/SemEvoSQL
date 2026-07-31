@@ -18,14 +18,12 @@ package cn.lgs.semevosql.connector.impls.oracle;
 import cn.lgs.semevosql.connector.pool.AbstractDBConnectionPool;
 import cn.lgs.semevosql.enums.BizDataSourceTypeEnum;
 import cn.lgs.semevosql.enums.ErrorCodeEnum;
-import org.springframework.stereotype.Service;
 
 import static cn.lgs.semevosql.enums.ErrorCodeEnum.DATASOURCE_CONNECTION_FAILURE_08S01;
 import static cn.lgs.semevosql.enums.ErrorCodeEnum.PASSWORD_ERROR_28000;
 import static cn.lgs.semevosql.enums.ErrorCodeEnum.DATABASE_NOT_EXIST_42000;
 import static cn.lgs.semevosql.enums.ErrorCodeEnum.OTHERS;
 
-@Service("oracleJdbcConnectionPool")
 public class OracleJdbcConnectionPool extends AbstractDBConnectionPool {
 
 	private final static String DRIVER = "oracle.jdbc.OracleDriver";

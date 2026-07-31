@@ -19,7 +19,9 @@ import cn.lgs.semevosql.bo.DbConfigBO;
 import cn.lgs.semevosql.dto.prompt.SemanticConsistencyDTO;
 import cn.lgs.semevosql.dto.prompt.SqlGenerationDTO;
 import cn.lgs.semevosql.dto.schema.SchemaDTO;
+import cn.lgs.semevosql.exception.ModelOutputInvalidException;
 import cn.lgs.semevosql.prompt.PromptHelper;
+import cn.lgs.semevosql.run.RunDeadlineUtil;
 import cn.lgs.semevosql.service.llm.LlmService;
 import cn.lgs.semevosql.util.*;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -52,7 +54,8 @@ public class Nl2SqlServiceImpl implements Nl2SqlService {
 	public Flux<ChatResponse> performSemanticConsistency(SemanticConsistencyDTO semanticConsistencyDTO) {
 		String semanticConsistencyPrompt = PromptHelper.buildSemanticConsistenPrompt(semanticConsistencyDTO);
 		log.debug("semanticConsistencyPrompt as follows \n {} \n", semanticConsistencyPrompt);
-		return llmService.callUser(semanticConsistencyPrompt);
+		return llmService.callUserWithin(semanticConsistencyPrompt,
+				RunDeadlineUtil.remaining(semanticConsistencyDTO.getRunDeadlineEpochMillis()));
 	}
 
 	@Override
@@ -67,7 +70,8 @@ public class Nl2SqlServiceImpl implements Nl2SqlService {
 			log.debug("Using SQL error fixer for existing SQL: {}", sql);
 			String errorFixerPrompt = PromptHelper.buildSqlErrorFixerPrompt(sqlGenerationDTO);
 			log.debug("SQL error fixer prompt as follows \n {} \n", errorFixerPrompt);
-			newSqlFlux = llmService.toStringFlux(llmService.callUser(errorFixerPrompt));
+			newSqlFlux = llmService.toStringFlux(llmService.callUserWithin(errorFixerPrompt,
+				RunDeadlineUtil.remaining(sqlGenerationDTO.getRunDeadlineEpochMillis())));
 			log.info("SQL error fixing completed");
 		}
 		else {
@@ -75,8 +79,9 @@ public class Nl2SqlServiceImpl implements Nl2SqlService {
 			log.debug("Generating new SQL from scratch");
 			String prompt = PromptHelper.buildNewSqlGeneratorPrompt(sqlGenerationDTO);
 			log.debug("New SQL generator prompt as follows \n {} \n", prompt);
-			newSqlFlux = llmService.toStringFlux(llmService.call(prompt,
-					"Generate the SQL now. Follow every system constraint and return only the SQL statement."));
+			newSqlFlux = llmService.toStringFlux(llmService.callWithin(prompt,
+					"Generate the SQL now. Follow every system constraint and return only the SQL statement.",
+					RunDeadlineUtil.remaining(sqlGenerationDTO.getRunDeadlineEpochMillis())));
 			log.info("New SQL generation completed");
 		}
 
@@ -84,14 +89,14 @@ public class Nl2SqlServiceImpl implements Nl2SqlService {
 	}
 
 	private Flux<ChatResponse> fineSelect(SchemaDTO schemaDTO, String sqlGenerateSchemaMissingAdvice,
-			Consumer<Set<String>> resultConsumer) {
+			Consumer<Set<String>> resultConsumer, Long runDeadlineEpochMillis) {
 		log.debug("Fine selecting tables based on advice: {}", sqlGenerateSchemaMissingAdvice);
 		String schemaInfo = buildMixMacSqlDbPrompt(schemaDTO, true);
 		String prompt = " 建议：" + sqlGenerateSchemaMissingAdvice
 				+ " \n 请按照建议进行返回相关表的名称，只返回建议中提到的表名，返回格式为：[\"a\",\"b\",\"c\"] \n " + schemaInfo;
 		log.debug("Built table selection with advice prompt as follows \n {} \n", prompt);
 		StringBuilder sb = new StringBuilder();
-		return llmService.callUser(prompt).doOnNext(r -> {
+		return llmService.callUserWithin(prompt, RunDeadlineUtil.remaining(runDeadlineEpochMillis)).doOnNext(r -> {
 			String text = r.getResult().getOutput().getText();
 			sb.append(text);
 		}).doOnComplete(() -> {
@@ -104,8 +109,8 @@ public class Nl2SqlServiceImpl implements Nl2SqlService {
 					});
 				}
 				catch (Exception e) {
-					log.error("Failed to parse table selection response: {}", jsonContent, e);
-					throw new IllegalStateException(jsonContent);
+					log.warn("Model table-selection output could not be parsed ({} chars)", jsonContent.length(), e);
+					throw new ModelOutputInvalidException("模型返回的表选择结果格式无效，请重试。", e);
 				}
 				if (tableList != null && !tableList.isEmpty()) {
 					Set<String> selectedTables = tableList.stream()
@@ -123,6 +128,13 @@ public class Nl2SqlServiceImpl implements Nl2SqlService {
 	@Override
 	public Flux<ChatResponse> fineSelect(SchemaDTO schemaDTO, String query, String evidence,
 			String sqlGenerateSchemaMissingAdvice, DbConfigBO specificDbConfig, Consumer<SchemaDTO> dtoConsumer) {
+		return fineSelect(schemaDTO, query, evidence, sqlGenerateSchemaMissingAdvice, specificDbConfig, dtoConsumer, null);
+	}
+
+	@Override
+	public Flux<ChatResponse> fineSelect(SchemaDTO schemaDTO, String query, String evidence,
+			String sqlGenerateSchemaMissingAdvice, DbConfigBO specificDbConfig, Consumer<SchemaDTO> dtoConsumer,
+			Long runDeadlineEpochMillis) {
 		log.debug("Fine selecting schema for query: {} with evidences and specificDbConfig: {}", query,
 				specificDbConfig != null ? specificDbConfig.getUrl() : "default");
 
@@ -131,11 +143,13 @@ public class Nl2SqlServiceImpl implements Nl2SqlService {
 
 		Set<String> selectedTables = new HashSet<>();
 
-		return FluxUtil.<ChatResponse, String>cascadeFlux(llmService.callUser(prompt), content -> {
+		return FluxUtil.<ChatResponse, String>cascadeFlux(
+			llmService.callUserWithin(prompt, RunDeadlineUtil.remaining(runDeadlineEpochMillis)), content -> {
 			Flux<ChatResponse> nextFlux;
 			if (sqlGenerateSchemaMissingAdvice != null) {
 				log.debug("Adding tables from schema missing advice");
-				nextFlux = this.fineSelect(schemaDTO, sqlGenerateSchemaMissingAdvice, selectedTables::addAll);
+				nextFlux = this.fineSelect(schemaDTO, sqlGenerateSchemaMissingAdvice, selectedTables::addAll,
+						runDeadlineEpochMillis);
 			}
 			else {
 				nextFlux = Flux.empty();
@@ -149,14 +163,8 @@ public class Nl2SqlServiceImpl implements Nl2SqlService {
 						});
 					}
 					catch (Exception e) {
-						// Some scenarios may prompt exceptions, such as:
-						// java.lang.IllegalStateException:
-						// Please provide database schema information so I can filter
-						// relevant
-						// tables based on your question.
-						// TODO 目前异常接口直接返回500，未返回异常信息，后续优化将异常返回给用户
-						log.error("Failed to parse fine selection response: {}", jsonContent, e);
-						throw new IllegalStateException(jsonContent);
+						log.warn("Model schema-selection output could not be parsed ({} chars)", jsonContent.length(), e);
+						throw new ModelOutputInvalidException("模型返回的 Schema 选择结果格式无效，请重试。", e);
 					}
 					if (tableList != null && !tableList.isEmpty()) {
 						selectedTables.addAll(tableList.stream().map(String::toLowerCase).collect(Collectors.toSet()));
@@ -172,7 +180,7 @@ public class Nl2SqlServiceImpl implements Nl2SqlService {
 				}
 				dtoConsumer.accept(schemaDTO);
 			});
-		}, flux -> flux.map(ChatResponseUtil::getText)
+			}, flux -> flux.map(ChatResponseUtil::getText)
 			.collect(StringBuilder::new, StringBuilder::append)
 			.map(StringBuilder::toString));
 	}

@@ -26,6 +26,9 @@ import cn.lgs.semevosql.learning.QueryCaseHints.EnumBindingHint;
 import cn.lgs.semevosql.learning.QueryCaseHints.FilterBindingHint;
 import cn.lgs.semevosql.learning.QueryCaseHints.ResultCompositionHint;
 import cn.lgs.semevosql.learning.QueryCaseHints.TimeBindingHint;
+import cn.lgs.semevosql.semantic.domain.ComputationIntent;
+import cn.lgs.semevosql.semantic.domain.ComputationIntent.Capability;
+import cn.lgs.semevosql.semantic.domain.ComputationIntent.Requirement;
 import cn.lgs.semevosql.semantic.domain.SemanticAssetStatus;
 import cn.lgs.semevosql.semantic.domain.SemanticCandidateSet;
 import cn.lgs.semevosql.semantic.domain.SemanticCandidateSet.RetrievalEvidence;
@@ -35,6 +38,7 @@ import cn.lgs.semevosql.semantic.domain.SemanticColumnRole;
 import cn.lgs.semevosql.semantic.retrieval.SemanticHybridRetrievalService.RetrievalHit;
 import cn.lgs.semevosql.util.JsonUtil;
 import com.fasterxml.jackson.databind.JsonNode;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -48,6 +52,7 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -61,6 +66,7 @@ import org.springframework.util.StringUtils;
  * deterministic semantic resolver expand those codes into the authoritative Semantic Blueprint.
  */
 @Service
+@Slf4j
 public class SemanticBlueprintGenerationService {
 
 	private static final int MAX_CANDIDATE_MODELS = 24;
@@ -73,6 +79,8 @@ public class SemanticBlueprintGenerationService {
 	private static final Set<String> SUPPORTED_TIME_GROUP_GRANULARITIES = Set.of("DAY", "MONTH", "YEAR");
 
 	private static final Pattern SCALAR_IDENTIFIER = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
+
+	private static final Pattern COMPUTATION_REQUIREMENT_TOKEN = Pattern.compile("[A-Za-z][A-Za-z0-9_]{0,63}");
 
 	private static final Pattern SCALAR_BINARY_EXPRESSION = Pattern
 		.compile("([A-Za-z_][A-Za-z0-9_]*)\\s*([+-])\\s*([A-Za-z_][A-Za-z0-9_]*)");
@@ -141,6 +149,27 @@ public class SemanticBlueprintGenerationService {
 			    empty, a RESOLVED response is valid only when the request is for independent scalar aggregates and
 			    resultComposition.type=SCALAR. Never return a relationship-free multi-model RESOLVED selection with
 			    resultComposition=null. Conversely, never invent a row-level relationship merely to satisfy this check.
+			16. computationCapabilities describes WHAT COMPUTATION the requested answer requires, never HOW SQL should be written.
+			    TIME_FILTER means the user's requested observation/output rows are explicitly bounded by a time predicate.
+			    A reference period used only as the baseline of PERIOD_COMPARISON is not itself a TIME_FILTER. If the user asks
+			    for one bounded period and also compares it with another period, include both TIME_FILTER and PERIOD_COMPARISON;
+			    if the user asks for a sequence of periods each compared with its predecessor, use PERIOD_COMPARISON without
+			    inventing a relative observation filter merely from the comparison baseline.
+			    Use only these capability names when required by the current request:
+			    PROJECTION, FILTER, AGGREGATION, GROUPING, ORDERING, LIMIT, JOIN, TIME_FILTER, TIME_BUCKET,
+			    CONDITIONAL_AGGREGATION, PERIOD_COMPARISON, WINDOW_ANALYTICS, PARTITION_RANKING,
+			    MULTI_STAGE_AGGREGATION, SET_OPERATION, RECURSIVE_QUERY, COHORT_ANALYSIS, MULTI_SOURCE,
+			    CROSS_SOURCE_MERGE, SCALAR_COMPOSITION. Include all capabilities materially required by the answer even when
+			    the deterministic SQL generator may not implement them; generator capability is an execution concern.
+			17. computationRequirements is optional and refines WHAT a capability means when capability names alone would lose
+			    user-visible semantics. Each item may contain only capability plus these small semantic parameters: metricCode,
+			    grain, mode, limit, scope, basis. metricCode must be one of metricCodes selected above. Examples of WHAT are
+			    PERIOD_COMPARISON(metricCode=paid_amount, grain=MONTH, mode=PREVIOUS_PERIOD_RATE),
+			    ORDERING(mode=HIGHEST, basis=PERIOD_COMPARISON), and LIMIT(limit=3, scope=GLOBAL, basis=ORDERING).
+			    Use semantic modes such as HIGHEST/LOWEST rather than SQL ASC/DESC when expressing user-visible ranking intent.
+			    Do NOT encode CTEs, LAG/LEAD calls, SQL expressions, aliases, window frames, subqueries, joins or other SQL
+			    AST/physical structure. Omit a parameter when the user did not specify or require it. Requirement capability must
+			    also appear in computationCapabilities.
 
 			For a resolved request return exactly one JSON object and no Markdown:
 			{
@@ -150,6 +179,10 @@ public class SemanticBlueprintGenerationService {
 			  "ruleCodes": ["published_rule_code"],
 			  "relationshipCodes": ["published_relationship_code"],
 			  "grainCodes": ["published_grain_code"],
+			  "computationCapabilities": ["AGGREGATION","TIME_BUCKET"],
+			  "computationRequirements": [
+			    {"capability":"TIME_BUCKET","metricCode":"published_metric_code","grain":"MONTH"}
+			  ],
 			  "enumBindings": [
 			    {"modelCode":"published_model_code","columnName":"published_column","valueCode":"published_value"}
 			  ],
@@ -175,15 +208,18 @@ public class SemanticBlueprintGenerationService {
 
 	private final PlannerReasoningProperties reasoningProperties;
 
+	private final SemanticPlanningProperties planningProperties;
+
 	private final MultiSourcePolicyService multiSourcePolicyService;
 
 	@Autowired
 	public SemanticBlueprintGenerationService(SemanticCatalogRepository catalogRepository,
 			SemanticDocumentExtractionClient extractionClient, PlannerReasoningProperties reasoningProperties,
-			MultiSourcePolicyService multiSourcePolicyService) {
+			SemanticPlanningProperties planningProperties, MultiSourcePolicyService multiSourcePolicyService) {
 		this.catalogRepository = catalogRepository;
 		this.extractionClient = extractionClient;
 		this.reasoningProperties = reasoningProperties;
+		this.planningProperties = planningProperties;
 		this.multiSourcePolicyService = multiSourcePolicyService;
 	}
 
@@ -193,6 +229,7 @@ public class SemanticBlueprintGenerationService {
 		this.extractionClient = extractionClient;
 		this.reasoningProperties = new PlannerReasoningProperties();
 		this.reasoningProperties.setEnabled(false);
+		this.planningProperties = new SemanticPlanningProperties();
 		this.multiSourcePolicyService = null;
 	}
 
@@ -261,41 +298,74 @@ public class SemanticBlueprintGenerationService {
 	public PlanningDecision planDecision(String query, SemanticCandidateSet candidates,
 			Collection<RetrievalHit> retrievalHits, QueryCaseHints historicalHints, QueryCaseHints requiredHints,
 			PlannerProfile profile) {
+		return planDecision(query, candidates, retrievalHits, historicalHints, requiredHints, profile, null);
+	}
+
+	public PlanningDecision planDecision(String query, SemanticCandidateSet candidates,
+			Collection<RetrievalHit> retrievalHits, QueryCaseHints historicalHints, QueryCaseHints requiredHints,
+			PlannerProfile profile, Long runDeadlineEpochMillis) {
+		PlanningSession session = PlanningSession.start(planningProperties, runDeadlineEpochMillis);
 		String userPrompt = userPrompt(query, candidates, retrievalHits, historicalHints, requiredHints);
+		QueryCaseHints historical = historicalHints == null ? QueryCaseHints.empty() : historicalHints;
+		QueryCaseHints required = requiredHints == null ? QueryCaseHints.empty() : requiredHints;
+		log.info(
+				"Semantic planner prompt profile: systemChars={}, estimatedSystemTokens={}, userChars={}, "
+						+ "estimatedUserTokens={}, candidateAssets={}, models={}, metrics={}, dimensions={}, "
+						+ "historicalHintExamples={}, requiredHintExamples={}, retrievalHits={}",
+				SYSTEM_PROMPT.length(), estimateTokens(SYSTEM_PROMPT), userPrompt.length(), estimateTokens(userPrompt),
+				candidateAssetCount(candidates), candidates.models().size(), candidates.metrics().size(),
+				candidates.dimensions().size(), historical.sourceExampleIds().size(), required.sourceExampleIds().size(),
+				retrievalHits == null ? 0 : retrievalHits.size());
 		List<ModelCallResult> calls = new ArrayList<>();
-		ModelCallResult initialCall = completePlanner(profile, SYSTEM_PROMPT, userPrompt);
+		ModelCallResult initialCall = completePlanner(profile, SYSTEM_PROMPT, userPrompt, session, false);
 		calls.add(initialCall);
 		String response = initialCall.response();
-		SemanticPlanningOutcome explicit = explicitNonResolvedOutcome(response);
-		if (explicit != null) {
-			return new PlanningDecision(explicit, calls);
-		}
 		try {
-			QueryCaseHints binding = parseAndValidate(query, response, candidates, requiredHints);
-			SemanticPlanningOutcome ambiguity = unresolvedGenericTimeAxis(query, candidates, binding);
-			return new PlanningDecision(ambiguity == null ? new SemanticPlanningOutcome.Resolved(binding) : ambiguity, calls);
+			SemanticPlanningOutcome explicit = explicitNonResolvedOutcome(response);
+			if (explicit != null) {
+				return new PlanningDecision(explicit, calls, session);
+			}
+			ParsedPlanningSelection selection = parseAndValidate(query, response, candidates, requiredHints);
+			SemanticPlanningOutcome ambiguity = unresolvedTimeAxis(candidates, selection.binding(), selection.computationIntent());
+			return new PlanningDecision(ambiguity == null
+					? new SemanticPlanningOutcome.Resolved(selection.binding(), selection.computationIntent()) : ambiguity, calls,
+					session);
 		}
 		catch (IllegalArgumentException firstFailure) {
 			String repairPrompt = userPrompt + "\n\nYour previous response was rejected by SemEvoSQL: "
 					+ safeError(firstFailure.getMessage())
 					+ "\nReturn a corrected JSON object using only the supplied candidate codes.";
-			ModelCallResult repairCall = completePlanner(profile, SYSTEM_PROMPT, repairPrompt);
+			ModelCallResult repairCall = completePlanner(profile, SYSTEM_PROMPT, repairPrompt, session, true);
 			calls.add(repairCall);
 			String repaired = repairCall.response();
-			SemanticPlanningOutcome repairedExplicit = explicitNonResolvedOutcome(repaired);
-			if (repairedExplicit != null) {
-				return new PlanningDecision(repairedExplicit, calls);
-			}
 			try {
-				QueryCaseHints binding = parseAndValidate(query, repaired, candidates, requiredHints);
-				SemanticPlanningOutcome ambiguity = unresolvedGenericTimeAxis(query, candidates, binding);
-				return new PlanningDecision(ambiguity == null ? new SemanticPlanningOutcome.Resolved(binding) : ambiguity, calls);
+				SemanticPlanningOutcome repairedExplicit = explicitNonResolvedOutcome(repaired);
+				if (repairedExplicit != null) {
+					return new PlanningDecision(repairedExplicit, calls, session);
+				}
+				ParsedPlanningSelection selection = parseAndValidate(query, repaired, candidates, requiredHints);
+				SemanticPlanningOutcome ambiguity = unresolvedTimeAxis(candidates, selection.binding(), selection.computationIntent());
+				return new PlanningDecision(ambiguity == null
+						? new SemanticPlanningOutcome.Resolved(selection.binding(), selection.computationIntent()) : ambiguity, calls,
+						session);
 			}
 			catch (IllegalArgumentException finalFailure) {
 				return new PlanningDecision(new SemanticPlanningOutcome.Rejected("INVALID_GOVERNED_SELECTION",
-						safeError(finalFailure.getMessage())), calls);
+						safeError(finalFailure.getMessage())), calls, session);
 			}
 		}
+	}
+
+	private int estimateTokens(String text) {
+		return Math.max(1, (text == null ? 0 : text.length() + 3) / 4);
+	}
+
+	private int candidateAssetCount(SemanticCandidateSet candidates) {
+		return candidates.models().size() + candidates.metrics().size() + candidates.dimensions().size()
+				+ candidates.enumValues().size() + candidates.querySelectableRules().size()
+				+ candidates.mandatoryGovernanceRules().size() + candidates.planningPolicies().size()
+				+ candidates.relationships().size() + candidates.grains().size() + candidates.timeColumns().size()
+				+ candidates.filterableColumns().size();
 	}
 
 	/**
@@ -306,33 +376,56 @@ public class SemanticBlueprintGenerationService {
 	public PlanningDecision repairAfterResolutionFailure(String query, SemanticCandidateSet candidates,
 			Collection<RetrievalHit> retrievalHits, QueryCaseHints historicalHints, QueryCaseHints requiredHints,
 			PlannerProfile profile, String rejectionReason) {
+		return repairAfterResolutionFailure(query, candidates, retrievalHits, historicalHints, requiredHints, profile,
+				rejectionReason, PlanningSession.start(planningProperties, null));
+	}
+
+	public PlanningDecision repairAfterResolutionFailure(String query, SemanticCandidateSet candidates,
+			Collection<RetrievalHit> retrievalHits, QueryCaseHints historicalHints, QueryCaseHints requiredHints,
+			PlannerProfile profile, String rejectionReason, PlanningSession planningSession) {
+		PlanningSession session = planningSession == null ? PlanningSession.start(planningProperties, null) : planningSession;
 		String userPrompt = userPrompt(query, candidates, retrievalHits, historicalHints, requiredHints);
 		String repairPrompt = userPrompt + "\n\nA previous syntactically valid RESOLVED selection was rejected by SemEvoSQL's "
 				+ "deterministic governed plan resolver: " + safeError(rejectionReason)
 				+ "\nReconsider the supplied candidate selection. Correct relationshipCodes/resultComposition or other governed "
 				+ "bindings only when justified by the request and supplied candidates. Do not invent a relationship, metric, "
 				+ "policy, or business meaning. Return exactly one corrected JSON object.";
-		ModelCallResult call = completePlanner(profile, SYSTEM_PROMPT, repairPrompt);
+		ModelCallResult call = completePlanner(profile, SYSTEM_PROMPT, repairPrompt, session, true);
 		List<ModelCallResult> calls = List.of(call);
 		String response = call.response();
-		SemanticPlanningOutcome explicit = explicitNonResolvedOutcome(response);
-		if (explicit != null) {
-			return new PlanningDecision(explicit, calls);
-		}
 		try {
-			QueryCaseHints binding = parseAndValidate(query, response, candidates, requiredHints);
-			SemanticPlanningOutcome ambiguity = unresolvedGenericTimeAxis(query, candidates, binding);
-			return new PlanningDecision(ambiguity == null ? new SemanticPlanningOutcome.Resolved(binding) : ambiguity, calls);
+			SemanticPlanningOutcome explicit = explicitNonResolvedOutcome(response);
+			if (explicit != null) {
+				return new PlanningDecision(explicit, calls, session);
+			}
+			ParsedPlanningSelection selection = parseAndValidate(query, response, candidates, requiredHints);
+			SemanticPlanningOutcome ambiguity = unresolvedTimeAxis(candidates, selection.binding(), selection.computationIntent());
+			return new PlanningDecision(ambiguity == null
+					? new SemanticPlanningOutcome.Resolved(selection.binding(), selection.computationIntent()) : ambiguity, calls,
+					session);
 		}
 		catch (IllegalArgumentException failure) {
 			return new PlanningDecision(new SemanticPlanningOutcome.Rejected("INVALID_GOVERNED_SELECTION",
-					safeError(failure.getMessage())), calls);
+					safeError(failure.getMessage())), calls, session);
 		}
 	}
 
-	static SemanticPlanningOutcome unresolvedGenericTimeAxis(String query, SemanticCandidateSet candidates,
-			QueryCaseHints binding) {
-		if (!requestsGenericTemporalGrouping(query) || candidates == null || binding == null) {
+	static SemanticPlanningOutcome unresolvedTimeAxis(SemanticCandidateSet candidates, QueryCaseHints binding,
+			ComputationIntent computationIntent) {
+		if (candidates == null || binding == null || computationIntent == null
+				|| !computationIntent.requiresExplicitTimeAxis()) {
+			return null;
+		}
+		if (binding.timeBinding() != null) {
+			return null;
+		}
+		Set<String> governedMetricTimeAxes = candidates.metrics()
+			.stream()
+			.filter(metric -> binding.metricCodes().contains(metric.getMetricCode()))
+			.filter(metric -> StringUtils.hasText(metric.getTimeColumn()))
+			.map(metric -> metric.getModelCode() + "::" + metric.getTimeColumn())
+			.collect(Collectors.toCollection(LinkedHashSet::new));
+		if (governedMetricTimeAxes.size() == 1) {
 			return null;
 		}
 		List<SemanticCatalogSnapshot.Dimension> plausible = candidates.dimensions()
@@ -351,21 +444,8 @@ public class SemanticBlueprintGenerationService {
 			.map(dimension -> new SemanticPlanningOutcome.Option("time-axis:" + dimension.getDimensionCode(),
 					timeAxisLabel(dimension), "DIMENSION", dimension.getDimensionCode()))
 			.toList();
-		return new SemanticPlanningOutcome.ClarificationRequired("SEMANTIC_AMBIGUITY", "你希望按哪个业务时间字段统计？", options,
-				"The request asks for a generic temporal grouping but multiple governed business time axes are plausible.");
-	}
-
-	private static boolean requestsGenericTemporalGrouping(String query) {
-		if (!StringUtils.hasText(query)) {
-			return false;
-		}
-		String normalized = query.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ").trim();
-		return normalized.contains("按时间统计") || normalized.contains("按时间分组") || normalized.contains("按时间汇总")
-				|| normalized.contains("按时间趋势") || normalized.contains("按日期统计") || normalized.contains("按日期分组")
-				|| normalized.contains("按日期汇总") || normalized.contains("按日期趋势") || normalized.contains("随时间")
-				|| normalized.contains("时间趋势") || normalized.contains("日期趋势") || normalized.contains("by time")
-				|| normalized.contains("by date") || normalized.contains("over time") || normalized.contains("time trend")
-				|| normalized.contains("date trend");
+		return new SemanticPlanningOutcome.ClarificationRequired("SEMANTIC_AMBIGUITY", "你希望使用哪个业务时间字段？", options,
+				"The requested computation requires a business time axis, but multiple governed time dimensions are plausible.");
 	}
 
 	private static String timeAxisLabel(SemanticCatalogSnapshot.Dimension dimension) {
@@ -374,14 +454,17 @@ public class SemanticBlueprintGenerationService {
 		return StringUtils.hasText(dimension.getModelCode()) ? label + " (" + dimension.getModelCode() + ")" : label;
 	}
 
-	private ModelCallResult completePlanner(PlannerProfile profile, String systemPrompt, String userPrompt) {
+	private ModelCallResult completePlanner(PlannerProfile profile, String systemPrompt, String userPrompt,
+			PlanningSession session, boolean repair) {
 		PlannerProfile effectiveProfile = profile == null ? PlannerProfile.CONFIGURED : profile;
+		Duration callBudget = session.nextCallBudget(repair);
 		return switch (effectiveProfile) {
-			case CONFIGURED -> extractionClient.complete(ModelCallPurpose.SEMANTIC_PLANNING, systemPrompt, userPrompt);
+			case CONFIGURED -> extractionClient.complete(ModelCallPurpose.SEMANTIC_PLANNING, systemPrompt, userPrompt,
+					callBudget);
 			case BASELINE -> extractionClient.complete(ModelCallPurpose.SEMANTIC_PLANNING, systemPrompt, userPrompt,
-					LlmInvocationOptions.none());
+					LlmInvocationOptions.none(), callBudget);
 			case REASONING -> extractionClient.complete(ModelCallPurpose.SEMANTIC_PLANNING, systemPrompt, userPrompt,
-					new LlmInvocationOptions(reasoningProperties.getModelOverride(), reasoningProperties.getEffort()));
+					new LlmInvocationOptions(reasoningProperties.getModelOverride(), reasoningProperties.getEffort()), callBudget);
 		};
 	}
 
@@ -645,7 +728,7 @@ public class SemanticBlueprintGenerationService {
 		return result;
 	}
 
-	private QueryCaseHints parseAndValidate(String query, String response, SemanticCandidateSet candidates,
+	private ParsedPlanningSelection parseAndValidate(String query, String response, SemanticCandidateSet candidates,
 			QueryCaseHints priorHints) {
 		JsonNode root = parseObject(response);
 		Set<String> metricCodes = stringSet(root.path("metricCodes"));
@@ -653,6 +736,8 @@ public class SemanticBlueprintGenerationService {
 		Set<String> ruleCodes = stringSet(root.path("ruleCodes"));
 		Set<String> relationshipCodes = stringSet(root.path("relationshipCodes"));
 		Set<String> grainCodes = stringSet(root.path("grainCodes"));
+		ComputationIntent computationIntent = computationIntent(root.path("computationCapabilities"),
+				root.path("computationRequirements"), metricCodes);
 
 		Map<String, SemanticCatalogSnapshot.Metric> metrics = candidates.metrics().stream()
 			.collect(Collectors.toMap(SemanticCatalogSnapshot.Metric::getMetricCode, Function.identity()));
@@ -724,7 +809,7 @@ public class SemanticBlueprintGenerationService {
 				relationshipCodes, ruleCodes, enumBindings, filterBindings, List.of(), timeBinding, true,
 				"LLM_SEMANTIC_PLANNER", List.of(), confidence, Map.of("semanticPlanner", confidence), resultComposition);
 		assertRequiredPriorBindings(result, priorHints);
-		return result;
+		return new ParsedPlanningSelection(result, computationIntent);
 	}
 
 	private void assertRequiredPriorBindings(QueryCaseHints result, QueryCaseHints priorHints) {
@@ -1123,7 +1208,7 @@ public class SemanticBlueprintGenerationService {
 		}
 	}
 
-	private Set<String> stringSet(JsonNode node) {
+	private static Set<String> stringSet(JsonNode node) {
 		if (node == null || node.isNull() || node.isMissingNode()) {
 			return Set.of();
 		}
@@ -1148,6 +1233,76 @@ public class SemanticBlueprintGenerationService {
 		}
 	}
 
+	static ComputationIntent computationIntent(JsonNode capabilityNode, JsonNode requirementNode,
+			Set<String> selectedMetricCodes) {
+		Set<String> names = stringSet(capabilityNode);
+		LinkedHashSet<Capability> capabilities = new LinkedHashSet<>();
+		for (String name : names) {
+			capabilities.add(computationCapability(name));
+		}
+		List<Requirement> requirements = new ArrayList<>();
+		if (requirementNode != null && !requirementNode.isMissingNode() && !requirementNode.isNull()) {
+			if (!requirementNode.isArray()) {
+				throw new IllegalArgumentException("computationRequirements must be an array");
+			}
+			if (requirementNode.size() > 32) {
+				throw new IllegalArgumentException("computationRequirements exceeds 32 items");
+			}
+			for (JsonNode item : requirementNode) {
+				if (!item.isObject()) {
+					throw new IllegalArgumentException("Each computation requirement must be an object");
+				}
+				Capability capability = computationCapability(text(item, "capability"));
+				capabilities.add(capability);
+				String metricCode = nullableText(item, "metricCode");
+				if (StringUtils.hasText(metricCode)
+						&& (selectedMetricCodes == null || !selectedMetricCodes.contains(metricCode))) {
+					throw new IllegalArgumentException("Computation requirement metricCode must be selected by the semantic planner");
+				}
+				Integer limit = requirementLimit(item.get("limit"));
+				requirements.add(new Requirement(capability, metricCode, requirementToken(item, "grain"),
+						requirementToken(item, "mode"), limit, requirementToken(item, "scope"),
+						requirementToken(item, "basis")));
+			}
+		}
+		return new ComputationIntent(capabilities, requirements);
+	}
+
+	private static Capability computationCapability(String name) {
+		try {
+			return Capability.valueOf(name.trim().toUpperCase(Locale.ROOT));
+		}
+		catch (IllegalArgumentException invalid) {
+			throw new IllegalArgumentException("Unsupported computation capability: " + name);
+		}
+	}
+
+	private static Integer requirementLimit(JsonNode node) {
+		if (node == null || node.isNull() || node.isMissingNode()) {
+			return null;
+		}
+		if (!node.isIntegralNumber() || !node.canConvertToInt()) {
+			throw new IllegalArgumentException("Computation requirement limit must be an integer");
+		}
+		int limit = node.asInt();
+		if (limit <= 0 || limit > 10000) {
+			throw new IllegalArgumentException("Computation requirement limit must be between 1 and 10000");
+		}
+		return limit;
+	}
+
+	private static String requirementToken(JsonNode item, String field) {
+		JsonNode node = item == null ? null : item.get(field);
+		if (node == null || node.isNull() || node.isMissingNode()) {
+			return null;
+		}
+		if (!node.isTextual() || !StringUtils.hasText(node.asText())
+				|| !COMPUTATION_REQUIREMENT_TOKEN.matcher(node.asText().trim()).matches()) {
+			throw new IllegalArgumentException("Computation requirement " + field + " must be a semantic token");
+		}
+		return node.asText().trim();
+	}
+
 	private double confidence(JsonNode node) {
 		if (node == null || !node.isNumber()) {
 			return 0.90d;
@@ -1155,7 +1310,7 @@ public class SemanticBlueprintGenerationService {
 		return Math.max(0.0d, Math.min(1.0d, node.asDouble()));
 	}
 
-	private String text(JsonNode node, String field) {
+	private static String text(JsonNode node, String field) {
 		String value = node == null ? null : node.path(field).asText(null);
 		if (!StringUtils.hasText(value)) {
 			throw new IllegalArgumentException("Semantic planner field is required: " + field);
@@ -1163,7 +1318,7 @@ public class SemanticBlueprintGenerationService {
 		return value.trim();
 	}
 
-	private String nullableText(JsonNode node, String field) {
+	private static String nullableText(JsonNode node, String field) {
 		JsonNode value = node == null ? null : node.get(field);
 		if (value == null || value.isNull() || value.isMissingNode()) {
 			return null;
@@ -1210,15 +1365,87 @@ public class SemanticBlueprintGenerationService {
 		return values == null ? List.of() : List.copyOf(values);
 	}
 
+	private record ParsedPlanningSelection(QueryCaseHints binding, ComputationIntent computationIntent) {
+	}
+
 	public enum PlannerProfile {
 		CONFIGURED,
 		BASELINE,
 		REASONING
 	}
 
-	public record PlanningDecision(SemanticPlanningOutcome outcome, List<ModelCallResult> modelCalls) {
+	public record PlanningDecision(SemanticPlanningOutcome outcome, List<ModelCallResult> modelCalls,
+			PlanningSession planningSession) {
 		public PlanningDecision {
 			modelCalls = List.copyOf(modelCalls == null ? List.of() : modelCalls);
+		}
+
+		public PlanningDecision(SemanticPlanningOutcome outcome, List<ModelCallResult> modelCalls) {
+			this(outcome, modelCalls, null);
+		}
+	}
+
+	public static final class PlanningSession {
+
+		private final long deadlineNanos;
+
+		private final int maxModelCalls;
+
+		private final long minimumRepairBudgetNanos;
+
+		private int startedModelCalls;
+
+		private PlanningSession(long totalBudgetMs, int maxModelCalls, long minimumRepairBudgetMs,
+				Long runDeadlineEpochMillis) {
+			long boundedBudgetMs = Math.max(1L, totalBudgetMs);
+			if (runDeadlineEpochMillis != null) {
+				boundedBudgetMs = Math.min(boundedBudgetMs,
+						Math.max(1L, runDeadlineEpochMillis - System.currentTimeMillis()));
+			}
+			this.deadlineNanos = System.nanoTime() + Duration.ofMillis(boundedBudgetMs).toNanos();
+			this.maxModelCalls = Math.max(1, maxModelCalls);
+			this.minimumRepairBudgetNanos = Duration.ofMillis(Math.max(1L, minimumRepairBudgetMs)).toNanos();
+		}
+
+		static PlanningSession start(SemanticPlanningProperties properties, Long runDeadlineEpochMillis) {
+			SemanticPlanningProperties effective = properties == null ? new SemanticPlanningProperties() : properties;
+			return new PlanningSession(effective.getTotalBudgetMs(), effective.getMaxModelCalls(),
+					effective.getMinimumRepairBudgetMs(), runDeadlineEpochMillis);
+		}
+
+		synchronized boolean hasCallCapacity() {
+			return startedModelCalls < maxModelCalls && remainingNanos() > 0L;
+		}
+
+		synchronized Duration nextCallBudget(boolean repair) {
+			if (startedModelCalls >= maxModelCalls) {
+				throw new SemanticPlanningBudgetExceededException("Semantic planning model-call budget exhausted");
+			}
+			long remaining = remainingNanos();
+			if (remaining <= 0L) {
+				throw new SemanticPlanningBudgetExceededException("Semantic planning timeout budget exhausted");
+			}
+			if (repair && remaining < minimumRepairBudgetNanos) {
+				throw new SemanticPlanningBudgetExceededException(
+						"Semantic planning remaining timeout budget is insufficient for repair");
+			}
+			startedModelCalls++;
+			return Duration.ofNanos(remaining);
+		}
+
+		synchronized int startedModelCalls() {
+			return startedModelCalls;
+		}
+
+		private long remainingNanos() {
+			return Math.max(0L, deadlineNanos - System.nanoTime());
+		}
+	}
+
+	public static class SemanticPlanningBudgetExceededException extends IllegalStateException {
+
+		public SemanticPlanningBudgetExceededException(String message) {
+			super(message, new java.util.concurrent.TimeoutException(message));
 		}
 	}
 

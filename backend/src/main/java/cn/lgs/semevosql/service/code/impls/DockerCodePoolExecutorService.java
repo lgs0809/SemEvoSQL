@@ -354,9 +354,7 @@ public class DockerCodePoolExecutorService extends AbstractCodePoolExecutorServi
 	// --- Helper Methods ---
 
 	private String buildExecutionCommand(Path tempDir) {
-		return String.format("export HOME=/tmp PYTHONPATH=/tmp/site-packages; mkdir -p /tmp/site-packages; "
-				+ "if [ -s requirements.txt ]; then pip3 install --no-cache-dir --target /tmp/site-packages "
-				+ "-r requirements.txt > /dev/null; fi && timeout -s SIGKILL %s python3 -u script.py < input_data.txt",
+		return String.format("export HOME=/tmp; timeout -s SIGKILL %s python3 -u script.py < input_data.txt",
 				properties.getCodeTimeout());
 	}
 

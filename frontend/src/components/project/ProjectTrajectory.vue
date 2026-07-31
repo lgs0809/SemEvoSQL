@@ -14,7 +14,7 @@
           <el-option
             v-for="version in versions"
             :key="version.id"
-            :label="`${version.versionNumber} · ${version.status}`"
+            :label="`${version.versionNumber} · ${versionStatusLabel(version.status)}`"
             :value="version.id"
           />
         </el-select>
@@ -100,8 +100,8 @@
           </el-table-column>
           <el-table-column label="成本" min-width="190">
             <template #default="scope">
-              {{ Math.round(scope.row.avg_latency_ms) }} ms ·
-              {{ Math.round(scope.row.avg_token_count) }} tokens · 平均重试
+              {{ Math.round(scope.row.avg_latency_ms) }} 毫秒 ·
+              {{ Math.round(scope.row.avg_token_count) }} 令牌 · 平均重试
               {{ Number(scope.row.avg_retry_count).toFixed(1) }} 次
             </template>
           </el-table-column>
@@ -130,7 +130,7 @@
           </el-table-column>
           <el-table-column label="成本" min-width="190">
             <template #default="scope">
-              {{ scope.row.latency_ms || 0 }} ms · {{ scope.row.token_count || 0 }} tokens · 重试
+              {{ scope.row.latency_ms || 0 }} 毫秒 · {{ scope.row.token_count || 0 }} 令牌 · 重试
               {{ scope.row.retry_count }} 次
             </template>
           </el-table-column>
@@ -168,6 +168,7 @@
     type SemanticProjectVersion,
     type TrajectoryPath,
   } from '@/services/semevosql';
+  import { versionStatusLabel } from '@/services/displayLabels';
 
   const props = defineProps<{
     projectId: number;

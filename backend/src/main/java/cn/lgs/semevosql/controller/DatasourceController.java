@@ -20,14 +20,13 @@ import cn.lgs.semevosql.dto.schema.CreateLogicalRelationDTO;
 import cn.lgs.semevosql.dto.schema.UpdateLogicalRelationDTO;
 import cn.lgs.semevosql.entity.Datasource;
 import cn.lgs.semevosql.entity.LogicalRelation;
-import cn.lgs.semevosql.enums.BizDataSourceTypeEnum;
 import cn.lgs.semevosql.exception.DatasourceNotFoundException;
 import cn.lgs.semevosql.service.datasource.DatasourceService;
 import cn.lgs.semevosql.service.datasource.DatasourceUsageService;
+import cn.lgs.semevosql.service.datasource.SemanticQueryDatasourceCapabilities;
 import cn.lgs.semevosql.service.datasource.DatasourceUsageService.DatasourceUsage;
 import cn.lgs.semevosql.vo.ApiResponse;
 import jakarta.validation.Valid;
-import java.util.Arrays;
 import java.util.List;
 import lombok.AllArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
@@ -54,10 +53,7 @@ public class DatasourceController {
 
 	@GetMapping("/types")
 	public ApiResponse<List<DatasourceTypeDTO>> getDatasourceTypes() {
-		List<BizDataSourceTypeEnum> standardTypes = Arrays.asList(BizDataSourceTypeEnum.MYSQL,
-				BizDataSourceTypeEnum.POSTGRESQL, BizDataSourceTypeEnum.DAMENG, BizDataSourceTypeEnum.SQL_SERVER,
-				BizDataSourceTypeEnum.ORACLE, BizDataSourceTypeEnum.HIVE);
-		List<DatasourceTypeDTO> types = standardTypes.stream()
+		List<DatasourceTypeDTO> types = SemanticQueryDatasourceCapabilities.supportedTypes().stream()
 			.map(type -> DatasourceTypeDTO.builder()
 				.code(type.getCode())
 				.typeName(type.getTypeName())

@@ -17,6 +17,9 @@ package cn.lgs.semevosql.workflow.node;
 
 import static cn.lgs.semevosql.constant.Constant.ACTIVE_TODO_ID;
 import static cn.lgs.semevosql.constant.Constant.ADVANCED_EXECUTION_FALLBACK;
+import static cn.lgs.semevosql.constant.Constant.ATTEMPT_ID;
+import static cn.lgs.semevosql.constant.Constant.FORCED_DATASOURCE_ID;
+import static cn.lgs.semevosql.constant.Constant.FORCED_PHYSICAL_TABLES;
 import static cn.lgs.semevosql.constant.Constant.LAST_SQL_EXECUTED_STEP;
 import static cn.lgs.semevosql.constant.Constant.LAST_SQL_RESULT_PAYLOAD;
 import static cn.lgs.semevosql.constant.Constant.PLAN_CURRENT_STEP;
@@ -49,8 +52,10 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HashMap;
 import java.util.HexFormat;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -85,16 +90,18 @@ public class SemanticExecutionNode implements NodeAction {
 		Long projectId = StateUtil.getObjectValue(state, PROJECT_ID, Long.class);
 		Long versionId = StateUtil.getObjectValue(state, PROJECT_VERSION_ID, Long.class);
 		String runId = StateUtil.getStringValue(state, RUN_ID, "");
+		String attemptId = StateUtil.getStringValue(state, ATTEMPT_ID, "");
 		String principalId = StateUtil.getStringValue(state, PRINCIPAL_ID, "anonymous");
 
 		String executionKey = executionKey(state, plan);
 		VerifiedQueryExecutionService.ExecutionResult executed;
 		try {
-			executed = verifiedQueryExecutionService.execute(runId, executionKey, projectId, versionId, principalId, plan);
+			executed = verifiedQueryExecutionService.execute(runId, attemptId, executionKey, projectId, versionId,
+					principalId, plan);
 		}
 		catch (ConstrainedGenerationRequiredException unsupported) {
 			log.info("Semantic Blueprint requires advanced/constrained execution fallback: {}", unsupported.getMessage());
-			return Map.of(SEMANTIC_EXECUTION_DECISION, FALLBACK_ADVANCED, ADVANCED_EXECUTION_FALLBACK, true);
+			return advancedFallback(plan);
 		}
 		catch (Exception failure) {
 			RepairBudget currentBudget = StateUtil.getObjectValue(state, QUERY_REPAIR_BUDGET, RepairBudget.class,
@@ -133,6 +140,32 @@ public class SemanticExecutionNode implements NodeAction {
 		update.put(LAST_SQL_RESULT_PAYLOAD, resultPayload);
 		update.put(SQL_RESULT_LIST_MEMORY, merged == null || merged.getData() == null ? List.of() : merged.getData());
 		return update;
+	}
+
+	static Map<String, Object> advancedFallback(SemanticBlueprint plan) {
+		Map<String, Object> fallback = new HashMap<>();
+		fallback.put(SEMANTIC_EXECUTION_DECISION, FALLBACK_ADVANCED);
+		fallback.put(ADVANCED_EXECUTION_FALLBACK, true);
+		if (plan.getSourceSubPlans() == null || plan.getSourceSubPlans().isEmpty()) {
+			return fallback;
+		}
+		Set<Integer> datasourceIds = new LinkedHashSet<>();
+		Set<String> physicalTables = new LinkedHashSet<>();
+		for (SemanticBlueprint.SourceSubPlan source : plan.getSourceSubPlans()) {
+			if (source.getDatasourceId() != null) {
+				datasourceIds.add(source.getDatasourceId());
+			}
+			if (source.getPhysicalTables() != null) {
+				physicalTables.addAll(source.getPhysicalTables());
+			}
+		}
+		if (datasourceIds.size() == 1) {
+			fallback.put(FORCED_DATASOURCE_ID, datasourceIds.iterator().next());
+			if (!physicalTables.isEmpty()) {
+				fallback.put(FORCED_PHYSICAL_TABLES, List.copyOf(physicalTables));
+			}
+		}
+		return fallback;
 	}
 
 	private String executionKey(OverAllState state, SemanticBlueprint plan) {

@@ -29,9 +29,27 @@ import cn.lgs.semevosql.run.QueryRun.RunStatus;
 import cn.lgs.semevosql.run.QueryRun.RunType;
 import cn.lgs.semevosql.run.QueryRunService.CreateRunCommand;
 import java.util.Optional;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.Test;
 
 class QueryRunServiceTest {
+
+	@Test
+	void interactiveRunPersistsOneAbsoluteDeadlineAtCreation() {
+		QueryRunRepository repository = mock(QueryRunRepository.class);
+		when(repository.findByIdempotencyKey("idem-deadline")).thenReturn(Optional.empty());
+		when(repository.insertIfAbsent(any(QueryRun.class))).thenReturn(1);
+		QueryRunService service = new QueryRunService(repository, "instance-a");
+
+		long before = System.currentTimeMillis();
+		service.create(command("idem-deadline", "request-deadline"));
+		long after = System.currentTimeMillis();
+
+		ArgumentCaptor<QueryRun> captor = ArgumentCaptor.forClass(QueryRun.class);
+		verify(repository).insertIfAbsent(captor.capture());
+		assertThat(captor.getValue().deadlineEpochMillis()).isNotNull();
+		assertThat(captor.getValue().deadlineEpochMillis()).isBetween(before + 299_000L, after + 301_000L);
+	}
 
 	@Test
 	void idempotencyKeyCanOnlyReplayTheSameCreateCommand() {
@@ -61,6 +79,36 @@ class QueryRunServiceTest {
 		assertThatThrownBy(() -> service.resume("run-1", "resume-1"))
 			.isInstanceOf(IllegalStateException.class)
 			.hasMessageContaining("WAITING_HUMAN or FAILED");
+		verify(repository, never()).updateStatus(eq("run-1"), anyLong(), any(), any(), any(), any(), any());
+	}
+
+	@Test
+	void expiredInteractiveRunCannotAcceptLateRuntimeEvent() {
+		QueryRunRepository repository = mock(QueryRunRepository.class);
+		QueryRunService service = new QueryRunService(repository, "instance-a");
+		when(repository.findEventByIdempotency("run-1", "late-event")).thenReturn(Optional.empty());
+		when(repository.lock("run-1")).thenReturn(QueryRun.builder()
+			.runId("run-1")
+			.runType(RunType.INTERACTIVE_QUERY)
+			.status(RunStatus.RUNNING)
+			.deadlineEpochMillis(System.currentTimeMillis() - 1)
+			.lastEventSequence(0)
+			.build());
+
+		assertThatThrownBy(() -> service.appendEvent("run-1", "NODE_OUTPUT", "planner", "{}", "late", "late-event"))
+			.isInstanceOf(RunDeadlineExceededException.class);
+		verify(repository, never()).advanceSequenceLocked(any(), anyLong(), any());
+	}
+
+	@Test
+	void attemptAwareTransitionRejectsSupersededAttempt() {
+		QueryRunRepository repository = mock(QueryRunRepository.class);
+		QueryRunService service = new QueryRunService(repository, "instance-a");
+		when(repository.lock("run-1")).thenReturn(run(RunStatus.RUNNING, "instance-a", "attempt-2"));
+
+		assertThatThrownBy(() -> service.transition("run-1", "attempt-1", RunStatus.SUCCEEDED, "done", null, null))
+			.isInstanceOf(LateRunResultDroppedException.class)
+			.hasMessageContaining("currentAttempt=attempt-2");
 		verify(repository, never()).updateStatus(eq("run-1"), anyLong(), any(), any(), any(), any(), any());
 	}
 
@@ -153,6 +201,10 @@ class QueryRunServiceTest {
 	}
 
 	private QueryRun run(RunStatus status, String ownerInstance) {
+		return run(status, ownerInstance, null);
+	}
+
+	private QueryRun run(RunStatus status, String ownerInstance, String attemptId) {
 		return QueryRun.builder()
 			.runId("run-1")
 			.runType(RunType.INTERACTIVE_QUERY)
@@ -160,6 +212,7 @@ class QueryRunServiceTest {
 			.projectVersionId(18L)
 			.threadId("thread-1")
 			.status(status)
+			.attemptId(attemptId)
 			.currentNode("HUMAN_FEEDBACK_NODE")
 			.lastEventSequence(0)
 			.requestId("request-a")

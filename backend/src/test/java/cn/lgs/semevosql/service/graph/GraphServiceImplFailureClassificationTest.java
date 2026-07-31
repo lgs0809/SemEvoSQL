@@ -18,10 +18,12 @@ package cn.lgs.semevosql.service.graph;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import cn.lgs.semevosql.semantic.application.SemanticPlanningRejectedException;
+import cn.lgs.semevosql.run.RunDeadlineExceededException;
 import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
+import reactor.core.publisher.Flux;
 
 class GraphServiceImplFailureClassificationTest {
 
@@ -59,5 +61,24 @@ class GraphServiceImplFailureClassificationTest {
 
 		assertThat(GraphFailureClassifier.errorCode(failure)).isEqualTo("GRAPH_EXECUTION_FAILED");
 		assertThat(GraphFailureClassifier.publicMessage(failure)).isEqualTo("查询执行失败，请稍后重试。");
+	}
+
+	@Test
+	void absoluteRunDeadlineExpiresEvenWhileGraphKeepsEmittingOutput() {
+		Flux<Long> activeStream = Flux.interval(java.time.Duration.ofMillis(5));
+
+		org.assertj.core.api.Assertions
+			.assertThatThrownBy(() -> GraphServiceImpl
+				.enforceAbsoluteDeadline(activeStream, System.currentTimeMillis() + 40)
+				.collectList()
+				.block())
+			.isInstanceOf(RunDeadlineExceededException.class);
+	}
+
+	@Test
+	void explicitRunDeadlineHasStableTimeoutClassification() {
+		RunDeadlineExceededException failure = new RunDeadlineExceededException("deadline");
+
+		assertThat(GraphFailureClassifier.errorCode(failure)).isEqualTo("INTERACTIVE_QUERY_TIMEOUT");
 	}
 }

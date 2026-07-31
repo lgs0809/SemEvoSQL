@@ -59,20 +59,86 @@ export_legacy_alias SEMEVOSQL_DEMO_POSTGRES_READER_PASSWORD QW_POSTGRES_READER_P
 export_legacy_alias SEMEVOSQL_DEMO_POSTGRES_PORT QW_SOURCE_POSTGRES_PORT
 export_legacy_alias SEMEVOSQL_EXECUTION_INTERNAL_TOKEN QUERYWEAVER_EXECUTION_INTERNAL_TOKEN
 export_legacy_alias SEMEVOSQL_SECRET_ENCRYPTION_KEY QUERYWEAVER_SECRET_ENCRYPTION_KEY
-export_legacy_alias SEMEVOSQL_JWT_ISSUER_URI QUERYWEAVER_JWT_ISSUER_URI
 export_legacy_alias SEMEVOSQL_SPRING_PROFILE QUERYWEAVER_SPRING_PROFILE
-export_legacy_alias SEMEVOSQL_SECURITY_ENABLED QUERYWEAVER_SECURITY_ENABLED
-export_legacy_alias SEMEVOSQL_OPERATOR_DEVELOPMENT_MODE QUERYWEAVER_OPERATOR_DEVELOPMENT_MODE
+
+effective_env_value() {
+  local key="$1"
+  local default_value="$2"
+  if [[ -n "${!key+x}" ]]; then
+    printf '%s' "${!key}"
+    return
+  fi
+  local value
+  value="$(env_file_value "$key")"
+  if [[ -n "$value" ]]; then
+    printf '%s' "$value"
+  else
+    printf '%s' "$default_value"
+  fi
+}
+
+bind_host="$(effective_env_value SEMEVOSQL_BIND_HOST 127.0.0.1)"
+allow_remote_bind="$(effective_env_value SEMEVOSQL_ALLOW_REMOTE_BIND false)"
+
+if [[ "$bind_host" != "127.0.0.1" && "$bind_host" != "localhost" && "$bind_host" != "::1" ]]; then
+  if [[ "$allow_remote_bind" != "true" ]]; then
+    echo "Refusing non-loopback exposure on SEMEVOSQL_BIND_HOST=$bind_host." >&2
+    echo "Keep SEMEVOSQL_BIND_HOST on loopback or explicitly set SEMEVOSQL_ALLOW_REMOTE_BIND=true after adding a trusted external access layer." >&2
+    exit 1
+  fi
+fi
 
 # Existing QueryWeaver developer environments keep their Docker project, volumes and network unless
 # explicitly migrated. Public SemEvoSQL deployments use the new defaults from .env.example.
+# Detect legacy resources by their Docker Compose logical labels as well as old env keys: a user may
+# already have migrated the env namespace while intentionally retaining the existing Docker data.
 LEGACY_COMPOSE_FILE=""
 if env_file_has_key "QUERYWEAVER_EXECUTION_INTERNAL_TOKEN" && ! env_file_has_key "SEMEVOSQL_COMPOSE_PROJECT_NAME"; then
   export SEMEVOSQL_COMPOSE_PROJECT_NAME="${SEMEVOSQL_COMPOSE_PROJECT_NAME:-queryweaver}"
   export SEMEVOSQL_METADATA_VOLUME="${SEMEVOSQL_METADATA_VOLUME:-queryweaver-metadata-pg16}"
   export SEMEVOSQL_UPLOADS_VOLUME="${SEMEVOSQL_UPLOADS_VOLUME:-queryweaver-uploads}"
   export SEMEVOSQL_NETWORK_NAME="${SEMEVOSQL_NETWORK_NAME:-queryweaver-net}"
+fi
+
+metadata_volume="$(effective_env_value SEMEVOSQL_METADATA_VOLUME semevosql-metadata-pg16)"
+uploads_volume="$(effective_env_value SEMEVOSQL_UPLOADS_VOLUME semevosql-uploads)"
+network_name="$(effective_env_value SEMEVOSQL_NETWORK_NAME semevosql-net)"
+legacy_resource_set=false
+if docker network inspect "$network_name" >/dev/null 2>&1; then
+  network_label="$(docker network inspect "$network_name" --format '{{index .Labels "com.docker.compose.network"}}' 2>/dev/null || true)"
+  if [[ -n "$network_label" && "$network_label" != "semevosql-net" ]]; then
+    legacy_resource_set=true
+  fi
+fi
+for volume_spec in "$metadata_volume:semevosql-metadata" "$uploads_volume:semevosql-uploads"; do
+  volume_name="${volume_spec%%:*}"
+  expected_label="${volume_spec##*:}"
+  if docker volume inspect "$volume_name" >/dev/null 2>&1; then
+    volume_label="$(docker volume inspect "$volume_name" --format '{{index .Labels "com.docker.compose.volume"}}' 2>/dev/null || true)"
+    if [[ -n "$volume_label" && "$volume_label" != "$expected_label" ]]; then
+      legacy_resource_set=true
+    fi
+  fi
+done
+if [[ "$legacy_resource_set" == "true" ]]; then
+  if ! docker network inspect "$network_name" >/dev/null 2>&1 \
+      || ! docker volume inspect "$metadata_volume" >/dev/null 2>&1 \
+      || ! docker volume inspect "$uploads_volume" >/dev/null 2>&1; then
+    echo "Detected a partially migrated Docker resource set; network and metadata/uploads volumes must be migrated together." >&2
+    exit 1
+  fi
   LEGACY_COMPOSE_FILE="$PROJECT_ROOT/deploy/semevosql/docker-compose.legacy.yml"
+fi
+
+# The execution worker is intentionally non-root but needs access to the host Docker
+# socket. Native Linux commonly assigns that socket to a non-zero docker group, while
+# Docker Desktop for macOS presents the mounted socket inside its Linux VM as gid 0.
+# Detect the socket GID only on Linux; an explicit SEMEVOSQL_DOCKER_GID always wins.
+if [[ -z "${SEMEVOSQL_DOCKER_GID:-}" && "$(uname -s)" == "Linux" && -e /var/run/docker.sock ]]; then
+  docker_gid="$(stat -Lc '%g' /var/run/docker.sock 2>/dev/null || true)"
+  if [[ "$docker_gid" =~ ^[0-9]+$ ]]; then
+    export SEMEVOSQL_DOCKER_GID="$docker_gid"
+  fi
 fi
 
 compose=(docker compose --env-file "$COMPOSE_ENV_FILE" -f "$COMPOSE_FILE")

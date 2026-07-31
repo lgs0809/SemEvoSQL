@@ -18,6 +18,7 @@ package cn.lgs.semevosql.multisource;
 import cn.lgs.semevosql.bo.schema.ResultSetBO;
 import cn.lgs.semevosql.multisource.MultiSourcePolicySnapshot.MergePolicy;
 import cn.lgs.semevosql.run.QueryRunService;
+import cn.lgs.semevosql.run.RunExecutionFenceService;
 import cn.lgs.semevosql.semantic.domain.SemanticBlueprint;
 import cn.lgs.semevosql.util.JsonUtil;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -52,9 +53,18 @@ public class MultiSourceRunService {
 
 	private final QueryRunService runService;
 
-@Transactional
+	private final RunExecutionFenceService executionFence;
+
+	@Transactional
 	public MultiSourceRunView initialize(String runId, String executionKey, Long projectId, Long versionId,
 			SemanticBlueprint plan) {
+		return initialize(runId, executionKey, projectId, versionId, plan, null);
+	}
+
+	@Transactional
+	public MultiSourceRunView initialize(String runId, String executionKey, Long projectId, Long versionId,
+			SemanticBlueprint plan, String attemptId) {
+		assertActive(runId, attemptId);
 		if (plan == null || !plan.isExecutable()) {
 			throw new IllegalArgumentException("An executable Semantic Blueprint is required");
 		}
@@ -91,6 +101,12 @@ public class MultiSourceRunService {
 
 	@Transactional
 	public SourceSubRun startSource(String runId, String subRunId, String sqlText) {
+		return startSource(runId, subRunId, sqlText, null);
+	}
+
+	@Transactional
+	public SourceSubRun startSource(String runId, String subRunId, String sqlText, String attemptId) {
+		assertActive(runId, attemptId);
 		SourceSubRun subRun = requireSubRun(runId, subRunId);
 		if (subRun.status() == SourceSubRunStatus.COMPLETED || subRun.status() == SourceSubRunStatus.FAILED
 				|| subRun.status() == SourceSubRunStatus.CANCELLED) {
@@ -118,6 +134,13 @@ public class MultiSourceRunService {
 	@Transactional
 	public ResultArtifact completeSource(String runId, String subRunId, String sqlText, ResultSetBO result,
 			String freshnessAsOf) {
+		return completeSource(runId, subRunId, sqlText, result, freshnessAsOf, null);
+	}
+
+	@Transactional
+	public ResultArtifact completeSource(String runId, String subRunId, String sqlText, ResultSetBO result,
+			String freshnessAsOf, String attemptId) {
+		assertActive(runId, attemptId);
 		SourceSubRun subRun = requireSubRun(runId, subRunId);
 		if (subRun.status() == SourceSubRunStatus.COMPLETED && subRun.resultArtifactId() != null) {
 			return requireArtifact(subRun.resultArtifactId());
@@ -163,6 +186,12 @@ public class MultiSourceRunService {
 
 	@Transactional
 	public SourceSubRun failSource(String runId, String subRunId, String errorMessage) {
+		return failSource(runId, subRunId, errorMessage, null);
+	}
+
+	@Transactional
+	public SourceSubRun failSource(String runId, String subRunId, String errorMessage, String attemptId) {
+		assertActive(runId, attemptId);
 		SourceSubRun subRun = requireSubRun(runId, subRunId);
 		if (subRun.status() == SourceSubRunStatus.COMPLETED || subRun.status() == SourceSubRunStatus.FAILED) {
 			return subRun;
@@ -183,11 +212,17 @@ public class MultiSourceRunService {
 
 	@Transactional
 	public ResultArtifact merge(String runId, String executionKey) {
-		return merge(runId, executionKey, null);
+		return merge(runId, executionKey, null, null);
 	}
 
 	@Transactional
 	public ResultArtifact merge(String runId, String executionKey, SemanticBlueprint plan) {
+		return merge(runId, executionKey, plan, null);
+	}
+
+	@Transactional
+	public ResultArtifact merge(String runId, String executionKey, SemanticBlueprint plan, String attemptId) {
+		assertActive(runId, attemptId);
 		String scope = requiredExecutionKey(executionKey);
 		MultiSourceRunView view = get(runId, scope);
 		if (view.mergeExecution().status() == MergeStatus.COMPLETED
@@ -245,6 +280,13 @@ public class MultiSourceRunService {
 				"Merged result completed with " + rowCount + " rows for execution " + scope,
 				"merge-complete:" + runId + ":" + scope);
 		return requireArtifact(artifactId);
+	}
+
+	private void assertActive(String runId, String attemptId) {
+		if (attemptId == null || attemptId.isBlank()) {
+			return;
+		}
+		executionFence.assertActiveAndLock(runId, attemptId);
 	}
 
 	private ResultSetBO shapeMergedResult(ResultSetBO merged, SemanticBlueprint plan) {
@@ -357,11 +399,52 @@ public class MultiSourceRunService {
 	}
 
 	public Optional<ResultArtifact> mergedArtifact(String runId) {
-		return jdbcTemplate.query("""
+		Optional<ResultArtifact> merged = jdbcTemplate.query("""
 				SELECT output_artifact_id FROM qw_merge_execution
 				WHERE run_id = ? AND status = 'COMPLETED' AND output_artifact_id IS NOT NULL
 				ORDER BY update_time DESC, merge_id DESC LIMIT 1
 				""", (rs, rowNum) -> rs.getString(1), runId).stream().findFirst().map(this::requireArtifact);
+		if (merged.isPresent()) {
+			return merged;
+		}
+		return jdbcTemplate.query("""
+				SELECT * FROM qw_result_artifact
+				WHERE run_id = ? AND source_sub_run_id IS NULL AND artifact_type = 'DIRECT_RESULT' AND status = 'READY'
+				ORDER BY update_time DESC, artifact_id DESC LIMIT 1
+				""", ARTIFACT_MAPPER, runId).stream().findFirst();
+	}
+
+	/**
+	 * Persists a single-source result only after the post-execution review has accepted
+	 * it. The attempt is part of the deterministic artifact identity so a replay is
+	 * idempotent while a replacement attempt cannot overwrite an earlier result.
+	 */
+	@Transactional
+	public ResultArtifact persistDirectResult(String runId, ResultSetBO result, String attemptId) {
+		assertActive(runId, attemptId);
+		if (result == null) {
+			throw new IllegalArgumentException("Direct result is required");
+		}
+		String identity = runId + ":" + Objects.toString(attemptId, "unbound") + ":direct-result";
+		String artifactId = UUID.nameUUIDFromBytes(identity.getBytes(StandardCharsets.UTF_8)).toString();
+		String schemaJson = json(result.getColumn() == null ? List.of() : result.getColumn());
+		String dataJson = json(result.getData() == null ? List.of() : result.getData());
+		long rowCount = result.getData() == null ? 0 : result.getData().size();
+		try {
+			jdbcTemplate.update("""
+					INSERT INTO qw_result_artifact
+					(artifact_id, run_id, source_sub_run_id, artifact_type, schema_json, data_json, row_count,
+					 content_hash, status)
+					VALUES (?, ?, NULL, 'DIRECT_RESULT', ?, ?, ?, ?, 'READY')
+					""", artifactId, runId, schemaJson, dataJson, rowCount, sha256(schemaJson + "\n" + dataJson));
+		}
+		catch (DuplicateKeyException duplicate) {
+			return requireArtifact(artifactId);
+		}
+		ResultArtifact artifact = requireArtifact(artifactId);
+		runService.appendEvent(runId, attemptId, "RESULT_ARTIFACT_READY", "result-artifact", json(artifact),
+				"Validated single-source result is ready", "result-artifact-ready:" + artifactId);
+		return artifact;
 	}
 
 	public ResultSetBO resultSet(ResultArtifact artifact) {

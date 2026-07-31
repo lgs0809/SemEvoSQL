@@ -22,6 +22,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import cn.lgs.semevosql.multisource.MultiSourcePolicySnapshot.MergeType;
 import cn.lgs.semevosql.semantic.compiler.SemanticSqlCompiler.ConstrainedGenerationRequiredException;
+import cn.lgs.semevosql.semantic.domain.ComputationIntent;
+import cn.lgs.semevosql.semantic.domain.ComputationIntent.Capability;
 import cn.lgs.semevosql.semantic.domain.SemanticAssetStatus;
 import cn.lgs.semevosql.semantic.domain.SemanticCatalogSnapshot;
 import cn.lgs.semevosql.semantic.domain.SemanticBlueprint;
@@ -36,11 +38,13 @@ class SemanticSqlCompilerCapabilityTest {
 	private final SemanticSqlCompiler compiler = new SemanticSqlCompiler();
 
 	@Test
-	void advancedAnalyticIntentEscalatesFromCompilerToPlannerInsteadOfBeingSilentlyFlattened() {
-		for (String query : List.of("按月份计算支付金额同比", "按天统计金额并用 LAG 返回上一天金额", "按周统计支付金额")) {
+	void advancedAnalyticIntentEscalatesByDeclaredCapabilityInsteadOfNaturalLanguageKeyword() {
+		for (Capability capability : List.of(Capability.PERIOD_COMPARISON, Capability.WINDOW_ANALYTICS,
+				Capability.PARTITION_RANKING)) {
 			SemanticBlueprint plan = SemanticBlueprint.builder()
-				.canonicalQuery(query)
+				.canonicalQuery("language independent governed computation")
 				.compilerMode("DETERMINISTIC")
+				.computationIntent(new ComputationIntent(java.util.Set.of(capability)))
 				.executable(true)
 				.validationErrors(List.of())
 				.build();
@@ -49,8 +53,33 @@ class SemanticSqlCompilerCapabilityTest {
 					() -> compiler.compile(plan, SemanticCatalogSnapshot.builder().build(), Map.of(), Clock.systemUTC(),
 							ZoneId.of("UTC")));
 
-			assertTrue(error.getMessage().contains("execution planning is required"));
+			assertTrue(error.getMessage().contains(capability.name()));
 		}
+	}
+
+	@Test
+	void queryWordingNeverChangesLoweringCapabilityDecision() {
+		SemanticBlueprint keywordPlan = SemanticBlueprint.builder()
+			.canonicalQuery("同比 环比 LAG rolling 留存 every week")
+			.compilerMode("DETERMINISTIC")
+			.executable(true)
+			.validationErrors(List.of())
+			.projections(List.of(SemanticBlueprint.ProjectionSelection.builder()
+				.modelCode("orders").columnName("id").alias("id").projectionType("DIMENSION").build()))
+			.sourceSubPlans(List.of(SemanticBlueprint.SourceSubPlan.builder().datasourceId(1)
+				.modelCodes(List.of("orders")).physicalTables(List.of("orders")).build()))
+			.build();
+		SemanticCatalogSnapshot catalog = SemanticCatalogSnapshot.builder()
+			.models(List.of(SemanticCatalogSnapshot.Model.builder().modelCode("orders").physicalTable("orders")
+				.datasourceId(1).status(SemanticAssetStatus.ENABLED).build()))
+			.columns(List.of(SemanticCatalogSnapshot.Column.builder().modelCode("orders").columnName("id")
+				.allowProjection(true).status(SemanticAssetStatus.ENABLED).build()))
+			.build();
+
+		CompiledSemanticQuery compiled = compiler.compile(keywordPlan, catalog, Map.of(1, SqlDialect.MYSQL),
+				Clock.systemUTC(), ZoneId.of("UTC"));
+
+		assertEquals(1, compiled.sources().size());
 	}
 
 	@Test

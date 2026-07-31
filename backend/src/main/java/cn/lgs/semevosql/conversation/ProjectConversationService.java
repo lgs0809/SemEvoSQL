@@ -35,6 +35,7 @@ import cn.lgs.semevosql.project.domain.SemanticProjectRepository;
 import cn.lgs.semevosql.run.ExecutionSnapshotService;
 import cn.lgs.semevosql.run.QueryExecutionExplanationService;
 import cn.lgs.semevosql.run.QueryRun;
+import cn.lgs.semevosql.run.QueryRunErrorPresenter;
 import cn.lgs.semevosql.run.QueryRun.RunType;
 import cn.lgs.semevosql.run.QueryRunService;
 import cn.lgs.semevosql.run.RunEvent;
@@ -85,6 +86,8 @@ public class ProjectConversationService {
 	private final GraphService graphService;
 
 	private final QueryRunService runService;
+
+	private final QueryRunErrorPresenter runErrorPresenter;
 
 	private final SemEvoSQLProductionService productionService;
 
@@ -377,7 +380,7 @@ public class ProjectConversationService {
 		}
 		else if (run.terminal()) {
 			content = queryTaskRepository.enabled(runId) ? requestSynthesis(run.runId()).orElseGet(() -> terminalContent(run))
-					: artifact == null ? terminalContent(run) : "任务已完成，合并结果共 " + artifact.rowCount() + " 行。";
+					: artifact == null ? terminalContent(run) : "查询已完成，返回 " + artifact.rowCount() + " 行结果。";
 		}
 		else {
 			content = queryTaskRepository.enabled(runId) ? requestProgressContent(run.runId())
@@ -397,7 +400,7 @@ public class ProjectConversationService {
 		if (artifact != null) {
 			metadata.put("artifactId", artifact.artifactId());
 			metadata.put("artifactApi",
-					"/api/semevosql/runs/" + runId + "/multi-source/artifacts/" + artifact.artifactId());
+					"/api/semevosql/runs/" + runId + "/artifacts/" + artifact.artifactId());
 			metadata.put("rowCount", artifact.rowCount());
 		}
 		jdbcTemplate.update("""
@@ -563,7 +566,7 @@ public class ProjectConversationService {
 		if (run.status() == QueryRun.RunStatus.CANCELLED) {
 			return "任务已取消。";
 		}
-		return "任务结束：" + run.status() + (run.errorMessage() == null ? "" : "，" + run.errorMessage());
+		return runErrorPresenter.present(run).message();
 	}
 
 	private void startGraphAfterCommit(GraphRequest request) {

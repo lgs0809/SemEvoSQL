@@ -15,7 +15,7 @@
 - Episode 创建时 pin Active Semantic Version；
 - Retrieval 保持 `Exact + BM25 + Vector -> RRF -> Rerank`，PATCH 走 affected-asset incremental index。
 
-发布门禁中，产品自身可控部分均已通过。唯一未形成“最终 SQL 成功返回”的真实 MCP data-plane smoke，是当前本机存量外部 Chat Provider 返回 `403 Forbidden`；该故障已通过产品自身模型连接测试复现，属于外部模型连接阻断，不是 MCP / Episode / Durable Run / Retrieval 状态机错误。
+发布门禁已全部通过。当前本机原 `gpt-5.4-mini` Chat 配置存在上游不稳定/拒绝，但复用同一份已加密凭据创建并验证 `gpt-5.6-luna` 后连接测试 PASS；激活 luna 后，真实 MCP data-plane 已完整跑通到 SQL 执行和结果返回。
 
 ## 2. Semantic Evolution 运行态证据
 
@@ -87,24 +87,32 @@
 
 同时修正了管理 UI 中残留的旧 5-tool BYO-Agent 使用说明，使其与真实 2-tool Episode API 一致。
 
-### 外部阻断
-
-真实 data-plane query 已经过：
-
-`MCP auth -> query admission -> Episode -> Run -> Request Analysis -> Semantic Retrieval -> Rerank -> Semantic Blueprint`
+### 真实 data-plane 完整通过
 
 本轮还修复了 CPU Rerank 性能问题：
 
 - 原逻辑把小 Catalog 的全部 19 个候选送入 2B Cross-Encoder，稳定触发 60s read timeout；
 - 现改为全量 Exact/BM25/Vector + RRF，Cross-Encoder 只精排 RRF Top-4，再用 RRF tail 补足 caller limit；
-- Top-4 后真实 Rerank 在约 34 秒完成，不再触发 60s timeout；
-- 随后 Run 才在 Semantic Blueprint 的 Chat 调用阶段被外部 Provider `403 Forbidden` 拒绝。
+- Top-4 后真实 Rerank 在约 34 秒完成，不再触发 60s timeout。
 
-产品自身 `/api/model-config/test` 对当前 active Chat connection 同样失败，因此该项记录为：
+Chat 连接方面，原 `gpt-5.4-mini` 在同一 Provider 下多次真实连接测试失败；未修改或暴露凭据，而是直接在 metadata DB 复制其已加密凭据创建 `gpt-5.6-luna` 配置。`gpt-5.6-luna` `/api/model-config/test` 约 2.9 秒返回 PASS，随后设为 active Chat。
 
-`BLOCKED_EXTERNAL: current Chat provider/credential rejects the request`
+激活 luna 后，真实 `/mcp` Streamable HTTP 已完整验证：
 
-未为了“验收变绿”伪造 LLM 输出或放宽业务状态机。
+- MCP protocol version=`2025-03-26`；
+- tools=`query`,`query_status`；
+- 问题：`统计全部订单的有效支付金额总额`；
+- 初始状态=`RUNNING`；
+- 相同 `requestId` 重试：same Episode=true，same Run=true；
+- 最终状态=`COMPLETED`；
+- SQL=``SELECT SUM(t0.`paid_amount` - t0.`refund_amount`) AS `effective_paid_amount` FROM `qw_bench_order` t0 LIMIT 100``；
+- result=`effective_paid_amount = 480.00`；
+- clarification=`null`；
+- error=`null`。
+
+第一次完整成功时还发现 `query_status` 终态已包含 SQL/result，但 `answer` 仍保留“任务已提交”占位文案。已修正 `ProjectMcpQueryFacade.status()`：终态会同步 durable conversation assistant message，再返回最终终态内容；重建真实 backend 后再次跑 MCP，`answer` 已切换为终态内容，不再返回 RUNNING 占位文案。
+
+验收结束后临时 Project MCP deployment 已 revoke。
 
 ## 5. Migration / Fresh Bootstrap
 
@@ -155,7 +163,7 @@
 
 已执行并通过：
 
-- Maven `verify`：89 tests，0 failures，0 errors；
+- Maven `verify`：90 tests，0 failures，0 errors；
 - Checkstyle：0 violations；
 - Spotless：clean；
 - frontend `npm run verify`：ESLint + vue-tsc + knip + production build PASS；
@@ -166,4 +174,4 @@
 
 ## 8. 发布状态
 
-代码层面可以进入分批 commit 收口。正式对外发布前仍建议重新配置并验证一个可用的 Chat connection，然后再补一条“真实 MCP query 最终返回 SQL/result”的外部依赖验收证据；除此之外，本轮 SemEvoSQL 领域模型、自动演进、Episode、MCP、Retrieval、Migration、Web 和发布卫生已完成收口。
+本轮 SemEvoSQL 领域模型、自动演进、Episode、MCP、Retrieval、Migration、Web、真实浏览器和真实 MCP data-plane 均已完成收口。当前 active Chat 已切换到连接测试通过的 `gpt-5.6-luna`；正式发布门禁无剩余阻断。

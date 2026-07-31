@@ -26,6 +26,7 @@ import cn.lgs.semevosql.properties.SemEvoSQLProperties;
 import cn.lgs.semevosql.learning.QueryPatternTemplateService;
 import cn.lgs.semevosql.learning.QueryPatternTemplateService.ReusableTemplate;
 import cn.lgs.semevosql.learning.ValidatedQueryExampleService;
+import cn.lgs.semevosql.learning.ValidatedSemanticSqlPatternService;
 import cn.lgs.semevosql.operations.SemanticCatalogCache;
 import cn.lgs.semevosql.semantic.compiler.CompiledSemanticQuery.CompiledSourceQuery;
 import cn.lgs.semevosql.semantic.compiler.SemanticSqlCompiler;
@@ -81,6 +82,8 @@ public class SqlGenerateNode implements NodeAction {
 	private final SemanticSqlCompiler semanticSqlCompiler;
 
 	private final QueryPatternTemplateService patternTemplateService;
+
+	private final ValidatedSemanticSqlPatternService semanticSqlPatternService;
 
 	@Override
 	public Map<String, Object> apply(OverAllState state) throws Exception {
@@ -171,16 +174,23 @@ public class SqlGenerateNode implements NodeAction {
 		Long projectId = StateUtil.getObjectValue(state, PROJECT_ID, Long.class, (Long) null);
 		Long projectVersionId = StateUtil.getObjectValue(state, PROJECT_VERSION_ID, Long.class, (Long) null);
 		String catalogHash = StateUtil.getStringValue(state, CATALOG_HASH, "");
+		String principalId = StateUtil.getStringValue(state, PRINCIPAL_ID, null);
 		String approvedExamples = queryExampleService.renderApprovedExamples(projectId, projectVersionId, catalogHash,
-				userQuery, 3);
+				userQuery, principalId, 3);
 		String dialect = StateUtil.getStringValue(state, DB_DIALECT_TYPE);
 		String semanticModel = StateUtil.getStringValue(state, GENEGRATED_SEMANTIC_MODEL_PROMPT, "");
 		SemanticBlueprint semanticPlan = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticBlueprint.class,
 				(SemanticBlueprint) null);
+		Integer datasourceId = StateUtil.getObjectValue(state, DATASOURCE_ID, Integer.class, (Integer) null);
+		String runId = StateUtil.getStringValue(state, RUN_ID, null);
+		String attemptId = StateUtil.getStringValue(state, ATTEMPT_ID, null);
+		String semanticPatternHints = semanticSqlPatternService.renderReusablePatternHints(projectId, projectVersionId,
+				catalogHash, datasourceId, principalId, runId, attemptId, semanticPlan, 3);
+		String queryExamples = approvedExamples + semanticPatternHints;
 
 		SqlGenerationDTO sqlGenerationDTO = SqlGenerationDTO.builder()
 			.evidence(evidence)
-			.queryExamples(approvedExamples)
+			.queryExamples(queryExamples)
 			.query(userQuery)
 			.schemaDTO(schemaDTO)
 			.semanticModel(semanticModel)
@@ -189,6 +199,8 @@ public class SqlGenerateNode implements NodeAction {
 			.exceptionMessage(errorMsg)
 			.executionDescription(executionDescription)
 			.dialect(dialect)
+			.runDeadlineEpochMillis(StateUtil.getObjectValue(state,
+					cn.lgs.semevosql.constant.Constant.RUN_DEADLINE_EPOCH_MILLIS, Long.class, (Long) null))
 			.build();
 
 		return nl2SqlService.generateSql(sqlGenerationDTO);

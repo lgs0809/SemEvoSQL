@@ -21,6 +21,7 @@ import cn.lgs.semevosql.service.graph.Context.ConversationContextPromptRenderer;
 import cn.lgs.semevosql.service.graph.Context.ConversationContextPromptRenderer.Stage;
 import cn.lgs.semevosql.service.graph.Context.ConversationContextStateView;
 import cn.lgs.semevosql.util.*;
+import cn.lgs.semevosql.run.RunDeadlineUtil;
 import com.alibaba.cloud.ai.graph.GraphResponse;
 import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.action.NodeAction;
@@ -32,6 +33,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
+
+import java.util.List;
 
 import java.util.Map;
 
@@ -66,7 +69,7 @@ public class QueryEnhanceNode implements NodeAction {
 		log.debug("Built query enhance prompt as follows \n {} \n", prompt);
 
 		// 调用LLM进行查询处理
-		Flux<ChatResponse> responseFlux = llmService.callUser(prompt);
+		Flux<ChatResponse> responseFlux = llmService.callUserWithin(prompt, RunDeadlineUtil.remaining(state));
 
 		Flux<GraphResponse<StreamingOutput>> generator = FluxUtil.createStreamingGenerator(this.getClass(), state,
 				responseFlux,
@@ -74,15 +77,19 @@ public class QueryEnhanceNode implements NodeAction {
 						ChatResponseUtil.createPureResponse(TextType.JSON.getStartSign())),
 				Flux.just(ChatResponseUtil.createPureResponse(TextType.JSON.getEndSign()),
 						ChatResponseUtil.createResponse("\n问题增强完成！")),
-				this::handleQueryEnhance);
+				output -> handleQueryEnhance(userInput, output));
 
 		return Map.of(QUERY_ENHANCE_NODE_OUTPUT, generator);
 	}
 
-	private Map<String, Object> handleQueryEnhance(String llmOutput) {
+	private Map<String, Object> handleQueryEnhance(String userInput, String llmOutput) {
 		// 获取处理结果
 		String enhanceResult = MarkdownParserUtil.extractRawText(llmOutput.trim());
 		log.info("Query enhance result: {}", enhanceResult);
+		if (enhanceResult.isBlank()) {
+			log.warn("Query enhance returned no content; retaining the original query as the canonical query");
+			return Map.of(QUERY_ENHANCE_NODE_OUTPUT, fallbackResult(userInput));
+		}
 
 		// 解析处理结果，转成 QueryProcessOutputDTO
 		QueryEnhanceOutputDTO queryEnhanceOutputDTO = null;
@@ -94,10 +101,29 @@ public class QueryEnhanceNode implements NodeAction {
 			log.error("Failed to parse query enhance result: {}", enhanceResult, e);
 		}
 
-		if (queryEnhanceOutputDTO == null)
-			return Map.of();
+		if (queryEnhanceOutputDTO == null || queryEnhanceOutputDTO.getCanonicalQuery() == null
+				|| queryEnhanceOutputDTO.getCanonicalQuery().isBlank()
+				|| queryEnhanceOutputDTO.getExpandedQueries() == null
+				|| queryEnhanceOutputDTO.getExpandedQueries().isEmpty()) {
+			log.warn("Query enhance output is incomplete; retaining the original query as the canonical query");
+			return Map.of(QUERY_ENHANCE_NODE_OUTPUT, fallbackResult(userInput));
+		}
 		// 返回处理结果
 		return Map.of(QUERY_ENHANCE_NODE_OUTPUT, queryEnhanceOutputDTO);
+	}
+
+	/**
+	 * Query enhancement is an optional retrieval aid, not a second semantic planner. If a provider returns an empty
+	 * or unusable response, retain the user's query so the already governed Semantic Blueprint can continue through
+	 * schema recall and the bounded advanced SQL path. This keeps provider hiccups from turning into a missing graph
+	 * state while never inventing business meaning locally.
+	 */
+	static QueryEnhanceOutputDTO fallbackResult(String userInput) {
+		String canonical = userInput == null ? "" : userInput.trim();
+		QueryEnhanceOutputDTO fallback = new QueryEnhanceOutputDTO();
+		fallback.setCanonicalQuery(canonical);
+		fallback.setExpandedQueries(canonical.isBlank() ? List.of() : List.of(canonical));
+		return fallback;
 	}
 
 }

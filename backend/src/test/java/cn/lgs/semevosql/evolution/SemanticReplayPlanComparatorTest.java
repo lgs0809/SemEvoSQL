@@ -17,10 +17,14 @@ package cn.lgs.semevosql.evolution;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import cn.lgs.semevosql.semantic.domain.ComputationIntent;
+import cn.lgs.semevosql.semantic.domain.ComputationIntent.Capability;
+import cn.lgs.semevosql.semantic.domain.ComputationIntent.Requirement;
 import cn.lgs.semevosql.semantic.domain.SemanticBlueprint;
 import cn.lgs.semevosql.semantic.domain.SemanticCatalogSnapshot;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class SemanticReplayPlanComparatorTest {
@@ -33,6 +37,29 @@ class SemanticReplayPlanComparatorTest {
 		SemanticBlueprint target = plan(null, "channel", true);
 
 		assertThat(comparator.comparePlans(source, target)).contains("Missing metric: paid_amount");
+	}
+
+	@Test
+	void ordinaryReplayRejectsChangedParameterizedComputationSemantics() {
+		SemanticBlueprint source = plan("paid_amount", "channel", true);
+		source.setComputationIntent(advancedIntent(3));
+		SemanticBlueprint target = plan("paid_amount", "channel", true);
+		target.setComputationIntent(advancedIntent(10));
+
+		assertThat(comparator.comparePlans(source, target))
+			.anyMatch(value -> value.contains("Computation requirements changed"));
+	}
+
+	@Test
+	void ordinaryReplayRebindPreservesTheGovernedComputationNeed() {
+		SemanticBlueprint source = plan("paid_amount", "channel", true);
+		source.setComputationIntent(advancedIntent(3));
+		SemanticBlueprint rebound = plan("paid_amount", "channel", true);
+
+		comparator.preserveComputationIntent(source, rebound);
+
+		assertThat(rebound.getComputationIntent()).isEqualTo(source.getComputationIntent());
+		assertThat(comparator.comparePlans(source, rebound)).isEmpty();
 	}
 
 	@Test
@@ -117,6 +144,15 @@ class SemanticReplayPlanComparatorTest {
 				.build()));
 		}
 		return builder.build();
+	}
+
+	private ComputationIntent advancedIntent(int limit) {
+		return new ComputationIntent(
+				Set.of(Capability.AGGREGATION, Capability.PERIOD_COMPARISON, Capability.ORDERING, Capability.LIMIT),
+				List.of(new Requirement(Capability.PERIOD_COMPARISON, "paid_amount", "MONTH", "PREVIOUS_PERIOD_RATE", null,
+						null, null),
+						new Requirement(Capability.ORDERING, null, null, "HIGHEST", null, null, "PERIOD_COMPARISON"),
+						new Requirement(Capability.LIMIT, null, null, null, limit, "GLOBAL", "ORDERING")));
 	}
 
 	private SemanticBlueprint.TimeRangeSelection relativeTime(String expression, String start, String end) {

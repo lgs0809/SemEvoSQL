@@ -18,10 +18,8 @@ package cn.lgs.semevosql.connector.impls.h2;
 import cn.lgs.semevosql.connector.pool.AbstractDBConnectionPool;
 import cn.lgs.semevosql.enums.BizDataSourceTypeEnum;
 import cn.lgs.semevosql.enums.ErrorCodeEnum;
-import org.springframework.stereotype.Service;
 
 /** Connection pool for H2 when it is used as an external business datasource. */
-@Service("h2JdbcConnectionPool")
 public class H2JdbcConnectionPool extends AbstractDBConnectionPool {
 
 	@Override

@@ -18,8 +18,10 @@ package cn.lgs.semevosql.workflow.node;
 import static cn.lgs.semevosql.constant.Constant.ORIGINAL_REQUEST;
 import static cn.lgs.semevosql.constant.Constant.RESULT;
 import static cn.lgs.semevosql.constant.Constant.RUN_ID;
+import static cn.lgs.semevosql.constant.Constant.ATTEMPT_ID;
 
 import cn.lgs.semevosql.run.QueryRunService;
+import cn.lgs.semevosql.run.RunExecutionFenceService;
 import cn.lgs.semevosql.task.GroundedRequestSynthesisService;
 import cn.lgs.semevosql.util.StateUtil;
 import com.alibaba.cloud.ai.graph.OverAllState;
@@ -37,12 +39,18 @@ public class RequestSynthesisNode implements NodeAction {
 
 	private final QueryRunService runService;
 
+	private final RunExecutionFenceService executionFence;
+
 	@Override
 	public Map<String, Object> apply(OverAllState state) {
 		String runId = StateUtil.getStringValue(state, RUN_ID, "");
+		String attemptId = StateUtil.getStringValue(state, ATTEMPT_ID, "");
+		if (!runId.isBlank() && !attemptId.isBlank()) {
+			executionFence.assertActive(runId, attemptId);
+		}
 		String original = StateUtil.getStringValue(state, ORIGINAL_REQUEST, StateUtil.getStringValue(state, "input", ""));
 		String synthesis = synthesisService.synthesize(runId, original);
-		runService.appendEvent(runId, "REQUEST_SYNTHESIS", "request-synthesis", synthesis,
+		runService.appendEvent(runId, attemptId, "REQUEST_SYNTHESIS", "request-synthesis", synthesis,
 				"Grounded request synthesis completed", "request-synthesis:" + runId);
 		return Map.of(RESULT, synthesis);
 	}

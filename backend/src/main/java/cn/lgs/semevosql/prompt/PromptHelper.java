@@ -88,9 +88,9 @@ public class PromptHelper {
 			line.append("(")
 				.append(columnDTO.getName())
 				.append(BooleanUtils.isTrue(withColumnType)
-						? ":" + StringUtils.defaultString(columnDTO.getType(), "").toUpperCase(Locale.ROOT) : "");
+						? ":" + Objects.toString(columnDTO.getType(), "").toUpperCase(Locale.ROOT) : "");
 			if (!StringUtils.equals(columnDTO.getDescription(), columnDTO.getName())) {
-				line.append(", ").append(StringUtils.defaultString(columnDTO.getDescription(), ""));
+				line.append(", ").append(Objects.toString(columnDTO.getDescription(), ""));
 			}
 			if (tableDTO.getPrimaryKeys() != null && !tableDTO.getPrimaryKeys().isEmpty()
 					&& tableDTO.getPrimaryKeys().contains(columnDTO.getName())) {
@@ -121,10 +121,10 @@ public class PromptHelper {
 		params.put("dialect", sqlGenerationDTO.getDialect());
 		params.put("question", sqlGenerationDTO.getQuery());
 		params.put("schema_info", schemaInfo);
-		params.put("semantic_model", StringUtils.defaultString(sqlGenerationDTO.getSemanticModel(), "无"));
-		params.put("semantic_plan", StringUtils.defaultString(sqlGenerationDTO.getSemanticPlan(), "{}"));
+		params.put("semantic_model", Objects.toString(sqlGenerationDTO.getSemanticModel(), "无"));
+		params.put("semantic_plan", Objects.toString(sqlGenerationDTO.getSemanticPlan(), "{}"));
 		params.put("evidence", sqlGenerationDTO.getEvidence());
-		params.put("query_examples", StringUtils.defaultString(sqlGenerationDTO.getQueryExamples(), "无"));
+		params.put("query_examples", Objects.toString(sqlGenerationDTO.getQueryExamples(), "无"));
 		params.put("execution_description", sqlGenerationDTO.getExecutionDescription());
 		return PromptConstant.getNewSqlGeneratorPromptTemplate().render(params);
 	}
@@ -136,8 +136,8 @@ public class PromptHelper {
 		params.put("user_query", semanticConsistencyDTO.getUserQuery());
 		params.put("evidence", semanticConsistencyDTO.getEvidence());
 		params.put("schema_info", semanticConsistencyDTO.getSchemaInfo());
-		params.put("semantic_model", StringUtils.defaultString(semanticConsistencyDTO.getSemanticModel(), "无"));
-		params.put("semantic_plan", StringUtils.defaultString(semanticConsistencyDTO.getSemanticPlan(), "{}"));
+		params.put("semantic_model", Objects.toString(semanticConsistencyDTO.getSemanticModel(), "无"));
+		params.put("semantic_plan", Objects.toString(semanticConsistencyDTO.getSemanticPlan(), "{}"));
 		params.put("sql", semanticConsistencyDTO.getSql());
 		return PromptConstant.getSemanticConsistencyPromptTemplate().render(params);
 	}
@@ -166,10 +166,10 @@ public class PromptHelper {
 		params.put("dialect", sqlGenerationDTO.getDialect());
 		params.put("question", sqlGenerationDTO.getQuery());
 		params.put("schema_info", schemaInfo);
-		params.put("semantic_model", StringUtils.defaultString(sqlGenerationDTO.getSemanticModel(), "无"));
-		params.put("semantic_plan", StringUtils.defaultString(sqlGenerationDTO.getSemanticPlan(), "{}"));
+		params.put("semantic_model", Objects.toString(sqlGenerationDTO.getSemanticModel(), "无"));
+		params.put("semantic_plan", Objects.toString(sqlGenerationDTO.getSemanticPlan(), "{}"));
 		params.put("evidence", sqlGenerationDTO.getEvidence());
-		params.put("query_examples", StringUtils.defaultString(sqlGenerationDTO.getQueryExamples(), "无"));
+		params.put("query_examples", Objects.toString(sqlGenerationDTO.getQueryExamples(), "无"));
 		params.put("error_sql", sqlGenerationDTO.getSql());
 		params.put("error_message", sqlGenerationDTO.getExceptionMessage());
 		params.put("execution_description", sqlGenerationDTO.getExecutionDescription());

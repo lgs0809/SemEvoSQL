@@ -18,14 +18,12 @@ package cn.lgs.semevosql.connector.impls.sqlserver;
 import cn.lgs.semevosql.connector.pool.AbstractDBConnectionPool;
 import cn.lgs.semevosql.enums.BizDataSourceTypeEnum;
 import cn.lgs.semevosql.enums.ErrorCodeEnum;
-import org.springframework.stereotype.Service;
 
 import static cn.lgs.semevosql.enums.ErrorCodeEnum.*;
 
 /**
  * @date 2025/12/14 17:34
  */
-@Service("sqlServerJdbcConnectionPool")
 public class SqlServerJdbcConnectionPool extends AbstractDBConnectionPool {
 
 	@Override

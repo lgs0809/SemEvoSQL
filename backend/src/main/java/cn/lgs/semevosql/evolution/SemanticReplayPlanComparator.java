@@ -92,6 +92,11 @@ class SemanticReplayPlanComparator {
 					.stream()
 					.map(SemanticBlueprint.RelationshipSelection::getRelationshipCode)
 					.collect(Collectors.toSet()));
+		Map<String, Object> sourceComputation = computationShape(source);
+		Map<String, Object> targetComputation = computationShape(target);
+		if (!Objects.equals(sourceComputation, targetComputation)) {
+			errors.add("Computation requirements changed: expected=" + sourceComputation + ", actual=" + targetComputation);
+		}
 		for (SemanticBlueprint.EnumResolution expected : source.getEnumResolutions()) {
 			boolean found = target.getEnumResolutions()
 				.stream()
@@ -104,6 +109,12 @@ class SemanticReplayPlanComparator {
 			}
 		}
 		return List.copyOf(errors);
+	}
+
+	void preserveComputationIntent(SemanticBlueprint source, SemanticBlueprint target) {
+		if (source != null && target != null) {
+			target.setComputationIntent(source.getComputationIntent());
+		}
 	}
 
 	List<String> comparePlanningPolicyPlans(SemanticBlueprint source, SemanticBlueprint target) {
@@ -161,6 +172,7 @@ class SemanticReplayPlanComparator {
 			.toList());
 		shape.put("timeRange", replayTimeRangeShape(plan.getTimeRange()));
 		shape.put("expectedResult", expectedResultShape(plan.getExpectedResult()));
+		shape.put("computation", computationShape(plan));
 		shape.put("compilerMode", Objects.toString(plan.getCompilerMode(), ""));
 		shape.put("limit", plan.getLimit());
 		return Map.copyOf(shape);
@@ -219,6 +231,15 @@ class SemanticReplayPlanComparator {
 					.collect(Collectors.toSet()),
 				"DIMENSION", missing);
 		return missing;
+	}
+
+	private Map<String, Object> computationShape(SemanticBlueprint plan) {
+		if (plan == null || plan.getComputationIntent() == null) {
+			return Map.of("capabilities", List.of(), "requirements", List.of());
+		}
+		return Map.of("capabilities",
+				plan.getComputationIntent().capabilities().stream().map(Enum::name).sorted().toList(), "requirements",
+				plan.getComputationIntent().canonicalRequirements());
 	}
 
 	Map<String, Object> planShape(SemanticBlueprint plan) {

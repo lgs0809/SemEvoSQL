@@ -26,11 +26,11 @@
         <el-card shadow="never">
           <div class="service-header">
             <div>
-              <h2>业务理解与问数模型</h2>
+              <h2>业务理解与查询模型</h2>
               <p>用于项目初始化、业务理解和查询执行。</p>
             </div>
-            <el-tag :type="statusType(readiness.chatModelReady)" effect="plain">
-              {{ readiness.chatModelReady ? '已验证可用' : '尚未就绪' }}
+            <el-tag :type="statusType(readiness.chatModelStatus)" effect="plain">
+              {{ statusLabel(readiness.chatModelStatus) }}
             </el-tag>
           </div>
           <div class="fact-row">
@@ -39,7 +39,7 @@
           </div>
           <div class="fact-row">
             <span>真实可用性验证</span>
-            <strong>{{ readiness.chatModelReady ? '最近测试通过' : '尚未通过' }}</strong>
+            <strong>{{ verificationLabel(readiness.chatModelStatus) }}</strong>
           </div>
           <div class="fact-row">
             <span>最近验证</span>
@@ -51,10 +51,10 @@
           <div class="service-header">
             <div>
               <h2>语义检索模型</h2>
-              <p>用于 Semantic Retrieval 与历史案例的向量召回。</p>
+              <p>用于语义检索与历史案例的向量召回。</p>
             </div>
-            <el-tag :type="statusType(readiness.embeddingModelReady)" effect="plain">
-              {{ readiness.embeddingModelReady ? '已验证可用' : '尚未就绪' }}
+            <el-tag :type="statusType(readiness.embeddingModelStatus)" effect="plain">
+              {{ statusLabel(readiness.embeddingModelStatus) }}
             </el-tag>
           </div>
           <div class="fact-row">
@@ -63,7 +63,7 @@
           </div>
           <div class="fact-row">
             <span>真实可用性验证</span>
-            <strong>{{ readiness.embeddingModelReady ? '最近测试通过' : '尚未通过' }}</strong>
+            <strong>{{ verificationLabel(readiness.embeddingModelStatus) }}</strong>
           </div>
           <div class="fact-row">
             <span>最近验证</span>
@@ -75,10 +75,10 @@
           <div class="service-header">
             <div>
               <h2>语义重排模型</h2>
-              <p>对 RRF 融合后的候选进行深度相关性重排，是标准语义检索链路的一部分。</p>
+              <p>对融合排序后的候选进行深度相关性重排，是标准语义检索链路的一部分。</p>
             </div>
-            <el-tag :type="statusType(readiness.rerankModelReady)" effect="plain">
-              {{ readiness.rerankModelReady ? '已验证可用' : '尚未就绪' }}
+            <el-tag :type="statusType(readiness.rerankModelStatus)" effect="plain">
+              {{ statusLabel(readiness.rerankModelStatus) }}
             </el-tag>
           </div>
           <div class="fact-row">
@@ -87,7 +87,7 @@
           </div>
           <div class="fact-row">
             <span>真实可用性验证</span>
-            <strong>{{ readiness.rerankModelReady ? '最近测试通过' : '尚未通过' }}</strong>
+            <strong>{{ verificationLabel(readiness.rerankModelStatus) }}</strong>
           </div>
           <div class="fact-row">
             <span>最近验证</span>
@@ -115,7 +115,7 @@
   import { onMounted, reactive, ref } from 'vue';
   import { useRouter } from 'vue-router';
   import BaseLayout from '@/layouts/BaseLayout.vue';
-  import modelConfigService from '@/services/modelConfig';
+  import modelConfigService, { type ModelReadinessStatus } from '@/services/modelConfig';
 
   const router = useRouter();
   const loading = ref(false);
@@ -123,12 +123,15 @@
   const readiness = reactive({
     chatModelConfigured: false,
     chatModelReady: false,
+    chatModelStatus: 'NOT_CONFIGURED' as ModelReadinessStatus,
     chatModelLastValidationTime: undefined as string | undefined,
     embeddingModelConfigured: false,
     embeddingModelReady: false,
+    embeddingModelStatus: 'NOT_CONFIGURED' as ModelReadinessStatus,
     embeddingModelLastValidationTime: undefined as string | undefined,
     rerankModelConfigured: false,
     rerankModelReady: false,
+    rerankModelStatus: 'NOT_CONFIGURED' as ModelReadinessStatus,
     rerankModelLastValidationTime: undefined as string | undefined,
     ready: false,
   });
@@ -145,7 +148,29 @@
     }
   };
 
-  const statusType = (ready: boolean) => (ready ? 'success' : 'warning');
+  const statusLabel = (status: ModelReadinessStatus) =>
+    ({
+      NOT_CONFIGURED: '未配置',
+      CONFIGURED: '待验证',
+      VERIFIED: '当前可用',
+      STALE: '验证已过期',
+      UNAVAILABLE: '当前不可用',
+    })[status];
+
+  const verificationLabel = (status: ModelReadinessStatus) =>
+    ({
+      NOT_CONFIGURED: '尚未配置',
+      CONFIGURED: '尚未完成真实调用验证',
+      VERIFIED: '最近验证仍在有效期内',
+      STALE: '历史测试通过，但需要重新验证',
+      UNAVAILABLE: '最近一次真实调用失败',
+    })[status];
+
+  const statusType = (status: ModelReadinessStatus) => {
+    if (status === 'VERIFIED') return 'success';
+    if (status === 'UNAVAILABLE') return 'danger';
+    return 'warning';
+  };
   const formatTime = (value?: string) =>
     value ? new Date(value.replace(' ', 'T')).toLocaleString('zh-CN') : '尚无验证记录';
 
@@ -154,9 +179,9 @@
 
 <style scoped>
   .settings-page {
-    max-width: 1180px;
+    max-width: 1440px;
     margin: 0 auto;
-    padding: 30px;
+    padding: 34px 40px 56px;
   }
   .heading,
   .service-header,
@@ -168,29 +193,33 @@
   }
   .heading h1 {
     margin: 0 0 6px;
-    color: #0f172a;
-    font-size: 30px;
+    color: #172a36;
+    font-size: clamp(26px, 2.5vw, 34px);
+    font-weight: 720;
+    letter-spacing: -0.035em;
   }
   .heading p,
   .service-header p,
   .advanced p {
     margin: 0;
-    color: #64748b;
+    color: #718289;
+    font-size: 13px;
     line-height: 1.65;
   }
   .service-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 18px;
-    margin: 24px 0;
+    gap: 20px;
+    margin: 28px 0;
   }
   .service-header {
     margin-bottom: 18px;
   }
   .service-header h2 {
     margin: 0 0 6px;
-    color: #0f172a;
-    font-size: 18px;
+    color: #17353b;
+    font-size: 17px;
+    font-weight: 720;
   }
   .fact-row {
     align-items: center;
@@ -198,10 +227,12 @@
     border-top: 1px solid #eef2f7;
   }
   .fact-row span {
-    color: #64748b;
+    color: #718289;
+    font-size: 13px;
   }
   .fact-row strong {
-    color: #0f172a;
+    color: #29444b;
+    font-size: 13px;
     text-align: right;
   }
   .actions {
@@ -211,13 +242,13 @@
   .advanced {
     margin-top: 22px;
     padding: 16px 18px;
-    border: 1px solid #e2e8f0;
+    border: 1px solid #dce5e7;
     border-radius: 12px;
-    background: #f8fafc;
+    background: #f7fafb;
   }
   .advanced summary {
     cursor: pointer;
-    color: #334155;
+    color: #29444b;
     font-weight: 650;
   }
   .advanced p {
@@ -225,7 +256,7 @@
   }
   @media (max-width: 760px) {
     .settings-page {
-      padding: 18px 10px;
+      padding: 24px 16px 40px;
     }
     .heading {
       flex-direction: column;

@@ -15,22 +15,14 @@
  */
 package cn.lgs.semevosql.common;
 
-import java.util.LinkedHashMap;
-import java.util.Map;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-/** Authentication bridge until a complete IAM integration is introduced. */
+/** Local operator identity for the self-hosted single-user product boundary. */
 @Data
 @ConfigurationProperties(prefix = "semevosql.operator")
 public class OperatorContextProperties {
 
-	private boolean developmentMode = false;
-
 	private String defaultOperator = "local-operator";
-
-	private OperatorRole defaultRole = OperatorRole.ADMIN;
-
-	private Map<String, OperatorRole> roleMappings = new LinkedHashMap<>();
 
 }

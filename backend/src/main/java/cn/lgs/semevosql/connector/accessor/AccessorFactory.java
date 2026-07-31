@@ -17,6 +17,7 @@ package cn.lgs.semevosql.connector.accessor;
 
 import cn.lgs.semevosql.bo.DbConfigBO;
 import cn.lgs.semevosql.enums.BizDataSourceTypeEnum;
+import cn.lgs.semevosql.service.datasource.SemanticQueryDatasourceCapabilities;
 import org.springframework.stereotype.Component;
 
 import java.util.Arrays;
@@ -36,8 +37,20 @@ public class AccessorFactory {
 
 	private final Map<String, Accessor> accessorMap = new ConcurrentHashMap<>();
 
+	private final Map<BizDataSourceTypeEnum, Accessor> accessorByDatasourceType = new ConcurrentHashMap<>();
+
 	public void register(Accessor accessor) {
-		accessorMap.put(accessor.getAccessorType(), accessor);
+		boolean supported = false;
+		for (BizDataSourceTypeEnum type : BizDataSourceTypeEnum.values()) {
+			if (SemanticQueryDatasourceCapabilities.supportedTypes().contains(type)
+					&& accessor.supportedDataSourceType(type.getTypeName())) {
+				accessorByDatasourceType.put(type, accessor);
+				supported = true;
+			}
+		}
+		if (supported) {
+			accessorMap.put(accessor.getAccessorType(), accessor);
+		}
 	}
 
 	public boolean isRegistered(String type) {
@@ -57,13 +70,12 @@ public class AccessorFactory {
 		return getAccessorByDbTypeEnum(typeEnum);
 	}
 
-	// todo: 写一层缓存
 	public Accessor getAccessorByDbTypeEnum(BizDataSourceTypeEnum typeEnum) {
-		return accessorMap.values()
-			.stream()
-			.filter(a -> a.supportedDataSourceType(typeEnum.getTypeName()))
-			.findFirst()
-			.orElseThrow(() -> new IllegalStateException("no accessor registered for dialect: " + typeEnum));
+		Accessor accessor = accessorByDatasourceType.get(typeEnum);
+		if (accessor == null) {
+			throw new IllegalStateException("no accessor registered for dialect: " + typeEnum);
+		}
+		return accessor;
 	}
 
 	public Accessor getAccessorByType(String type) {

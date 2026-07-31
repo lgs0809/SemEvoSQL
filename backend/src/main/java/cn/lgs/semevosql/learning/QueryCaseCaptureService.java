@@ -18,6 +18,8 @@ package cn.lgs.semevosql.learning;
 import cn.lgs.semevosql.common.json.CanonicalJson;
 import cn.lgs.semevosql.common.json.JsonPayloadRegistry;
 import cn.lgs.semevosql.common.json.VersionedJson;
+import cn.lgs.semevosql.run.SemanticPlanSnapshotService;
+import cn.lgs.semevosql.run.RunExecutionFenceService;
 import cn.lgs.semevosql.semantic.application.SemanticCatalogPatchAnalyzer;
 import cn.lgs.semevosql.semantic.domain.SemanticAssetProvenance.AssetType;
 import cn.lgs.semevosql.semantic.domain.SemanticCatalogRepository;
@@ -41,6 +43,7 @@ import java.util.TreeMap;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import org.springframework.dao.DataAccessException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -72,11 +75,17 @@ public class QueryCaseCaptureService {
 
 	private final SemanticCatalogRepository catalogRepository;
 
+	private final SemanticPlanSnapshotService semanticPlanSnapshots;
+
+	private final RunExecutionFenceService executionFence;
+
+	@Autowired
 	public QueryCaseCaptureService(JdbcTemplate jdbc, QueryCaseRepository repository,
 			QueryCaseAssetReferenceRepository assetReferences, QueryCaseLineageService lineageService,
 			QueryCaseRetrievalIndexService retrievalIndex,
 			ConversationContextDependencyFingerprintService contextFingerprintService,
-			SemanticCatalogPatchAnalyzer patchAnalyzer, SemanticCatalogRepository catalogRepository) {
+			SemanticCatalogPatchAnalyzer patchAnalyzer, SemanticCatalogRepository catalogRepository,
+			SemanticPlanSnapshotService semanticPlanSnapshots, RunExecutionFenceService executionFence) {
 		this.jdbc = jdbc;
 		this.repository = repository;
 		this.assetReferences = assetReferences;
@@ -85,6 +94,19 @@ public class QueryCaseCaptureService {
 		this.contextFingerprintService = contextFingerprintService;
 		this.patchAnalyzer = patchAnalyzer;
 		this.catalogRepository = catalogRepository;
+		this.semanticPlanSnapshots = semanticPlanSnapshots;
+		this.executionFence = executionFence;
+	}
+
+	/** Lightweight constructor retained for focused capture tests. */
+	public QueryCaseCaptureService(JdbcTemplate jdbc, QueryCaseRepository repository,
+			QueryCaseAssetReferenceRepository assetReferences, QueryCaseLineageService lineageService,
+			QueryCaseRetrievalIndexService retrievalIndex,
+			ConversationContextDependencyFingerprintService contextFingerprintService,
+			SemanticCatalogPatchAnalyzer patchAnalyzer, SemanticCatalogRepository catalogRepository,
+			SemanticPlanSnapshotService semanticPlanSnapshots) {
+		this(jdbc, repository, assetReferences, lineageService, retrievalIndex, contextFingerprintService, patchAnalyzer,
+				catalogRepository, semanticPlanSnapshots, null);
 	}
 
 	@Transactional
@@ -126,7 +148,11 @@ public class QueryCaseCaptureService {
 		Integer datasourceId = source.get("datasource_id") == null ? null
 				: ((Number) source.get("datasource_id")).intValue();
 		String runId = Objects.toString(source.get("run_id"), "");
-		Optional<SemanticBlueprint> plan = readPlan(Objects.toString(source.get("execution_snapshot"), ""), runId);
+		String attemptId = Objects.toString(source.get("attempt_id"), "");
+		if (executionFence != null && StringUtils.hasText(runId) && StringUtils.hasText(attemptId)) {
+			executionFence.assertFinalizerOwnsRunAndLock(runId, attemptId);
+		}
+		Optional<SemanticBlueprint> plan = semanticPlanSnapshots.latest(runId);
 		String typedIrJson = plan.map(value -> versionedJson.write(JsonPayloadRegistry.SEMANTIC_QUERY_PLAN, value))
 			.orElse(null);
 		String intentType = plan.map(this::intentType).orElse(null);
@@ -138,8 +164,9 @@ public class QueryCaseCaptureService {
 		Map<String, Object> proof = qualityProof(source, runId, plan.orElse(null));
 		boolean autoApproved = autoApprovable(projectVersionId, plan.orElse(null), resolutions, source, runId);
 		String sqlHash = sha256(normalizeSql(sql));
+		String scopeSignature = plan.map(QueryCaseCaptureService::scopeSignature).orElse("PROJECT_SAFE");
 		String fingerprint = sha256(projectId + "|" + projectVersionId + "|" + catalogHash + "|" + datasourceId + "|"
-				+ normalizeText(question) + "|" + sqlHash);
+				+ normalizeText(question) + "|" + sqlHash + "|" + scopeSignature);
 		String qualitySummary = json(Map.of("source", "EPISODE_FEEDBACK", "rating",
 				source.get("rating") == null ? 0 : source.get("rating"), "adopted", truth(source.get("adopted")),
 				"sqlTraceId", Objects.toString(source.get("sql_trace_id"), ""), "structuredPlan", plan.isPresent(),
@@ -182,10 +209,14 @@ public class QueryCaseCaptureService {
 						""", typedIrJson, intentType, timeRangeJson, shapeHash,
 						versionedJson.write(JsonPayloadRegistry.QUERY_CASE_QUALITY_PROOF, proof), qualitySummary, existingId);
 				persistAssetReferences(existingId, catalogHash, plan.get());
+				persistBindingDependencies(existingId, plan.get());
 			}
 			return existing.map(row -> repository.get(number(row.get("project_id")), Objects.toString(row.get("id"))));
 		}
-		plan.ifPresent(value -> persistAssetReferences(id, catalogHash, value));
+		plan.ifPresent(value -> {
+			persistAssetReferences(id, catalogHash, value);
+			persistBindingDependencies(id, value);
+		});
 		lineageService.appendEvent(id, "QUERY_CASE_CAPTURED", null, "CANDIDATE", "semevosql-system", "SYSTEM",
 				Map.of("derivedFromCaseIds", lineage.derivedFromCaseIds(), "rootEvidenceIds", lineage.rootEvidenceIds(),
 						"evidenceLineageHash", lineage.lineageHash()));
@@ -195,30 +226,35 @@ public class QueryCaseCaptureService {
 			jdbc.update("""
 					UPDATE qw_query_example
 					SET status = 'APPROVED', reviewed_by = 'semevosql-system',
-					    review_comment = 'Automatically reusable deterministic Semantic Blueprint',
+					    review_comment = 'Automatically reusable validated Semantic Query Case',
 					    reviewed_time = CURRENT_TIMESTAMP, update_time = CURRENT_TIMESTAMP
 					WHERE id = ? AND status = 'CANDIDATE'
 					""", id);
 			retrievalIndex.indexApprovedCase(id, question);
 			lineageService.appendEvent(id, "QUERY_CASE_AUTO_APPROVED", "CANDIDATE", "APPROVED", "semevosql-system",
-					"SYSTEM", Map.of("reason", "deterministic-single-source-success-without-clarification"));
+					"SYSTEM", Map.of("reason", "validated-single-source-success-with-scope-aware-reuse"));
 		}
 		return Optional.of(repository.get(projectId, id));
 	}
 
 	private boolean autoApprovable(Long projectVersionId, SemanticBlueprint plan, List<Map<String, Object>> resolutions,
 			Map<String, Object> source, String runId) {
-		if (plan == null || !plan.isExecutable() || !"DETERMINISTIC".equalsIgnoreCase(plan.getCompilerMode())
-				|| plan.getSourceSubPlans().size() != 1 || (resolutions != null && !resolutions.isEmpty())
-				|| !postExecutionReviewPassed(runId)) {
+		if (plan == null || !plan.isExecutable() || plan.getSourceSubPlans().size() != 1
+				|| (resolutions != null && !resolutions.isEmpty()) || !postExecutionReviewPassed(runId)) {
 			return false;
 		}
 		Map<String, Object> explain = jsonMap(Objects.toString(source.get("explain_summary"), ""));
-		if (!"DETERMINISTIC".equalsIgnoreCase(Objects.toString(explain.get("compilerMode"), ""))) {
-			return false;
-		}
+		String compilerMode = Objects.toString(explain.get("compilerMode"), "");
 		int retryCount = source.get("retry_count") instanceof Number number ? number.intValue() : 0;
 		if (Math.max(0, retryCount - 1) > 0) {
+			return false;
+		}
+		boolean deterministic = "DETERMINISTIC".equalsIgnoreCase(compilerMode)
+				|| "PATTERN_TEMPLATE".equalsIgnoreCase(compilerMode);
+		boolean positiveFeedback = truth(source.get("adopted"))
+				|| source.get("rating") instanceof Number rating && rating.intValue() >= 4;
+		boolean stronglyValidatedAdvanced = "SEMANTIC_SQL".equalsIgnoreCase(compilerMode) && positiveFeedback;
+		if (!deterministic && !stronglyValidatedAdvanced) {
 			return false;
 		}
 		Boolean published = jdbc.queryForObject(
@@ -268,38 +304,6 @@ public class QueryCaseCaptureService {
 		}
 	}
 
-	private Optional<SemanticBlueprint> readPlan(String executionSnapshotJson, String runId) {
-		if (StringUtils.hasText(executionSnapshotJson)) {
-			try {
-				JsonNode root = versionedJson.payload(executionSnapshotJson, JsonPayloadRegistry.EXECUTION_SNAPSHOT);
-				JsonNode plan = root.get("semanticPlan");
-				if (plan != null && !plan.isNull()) {
-					return Optional.of(mapper.treeToValue(plan, SemanticBlueprint.class));
-				}
-			}
-			catch (Exception ignored) {
-				// Fall through to the authoritative runtime Semantic Plan snapshot below.
-			}
-		}
-		if (!StringUtils.hasText(runId)) {
-			return Optional.empty();
-		}
-		List<String> snapshots = jdbc.queryForList("""
-				SELECT payload FROM qw_run_event
-				WHERE run_id = ? AND event_type = 'SEMANTIC_PLAN_SNAPSHOT'
-				ORDER BY sequence DESC LIMIT 1
-				""", String.class, runId);
-		if (snapshots.isEmpty() || !StringUtils.hasText(snapshots.get(0))) {
-			return Optional.empty();
-		}
-		try {
-			return Optional.of(mapper.readValue(snapshots.get(0), SemanticBlueprint.class));
-		}
-		catch (Exception invalid) {
-			return Optional.empty();
-		}
-	}
-
 	private Map<String, Object> qualityProof(Map<String, Object> source, String runId, SemanticBlueprint plan) {
 		Map<String, Object> proof = new LinkedHashMap<>();
 		proof.put("episodeSucceeded", true);
@@ -325,6 +329,26 @@ public class QueryCaseCaptureService {
 			}
 		}
 		return Map.copyOf(proof);
+	}
+
+	private void persistBindingDependencies(String queryCaseId, SemanticBlueprint plan) {
+		if (!StringUtils.hasText(queryCaseId) || plan == null) {
+			return;
+		}
+		jdbc.update("DELETE FROM qw_query_case_binding_dependency WHERE query_example_id = ?", queryCaseId);
+		for (SemanticBlueprint.BindingDependency dependency : plan.getBindingDependencies()) {
+			if (!StringUtils.hasText(dependency.getAssetType()) || !StringUtils.hasText(dependency.getAssetKey())
+					|| !StringUtils.hasText(dependency.getScope()) || !StringUtils.hasText(dependency.getSource())) {
+				continue;
+			}
+			jdbc.update("""
+					INSERT INTO qw_query_case_binding_dependency
+					(query_example_id, phrase, asset_type, asset_key, binding_scope, binding_source, principal_id, source_record_id)
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+					ON CONFLICT DO NOTHING
+					""", queryCaseId, dependency.getPhrase(), dependency.getAssetType(), dependency.getAssetKey(),
+					dependency.getScope(), dependency.getSource(), dependency.getPrincipalId(), dependency.getSourceRecordId());
+		}
 	}
 
 	private void persistAssetReferences(String queryCaseId, String catalogHash, SemanticBlueprint plan) {
@@ -399,6 +423,19 @@ public class QueryCaseCaptureService {
 		return "ENTITY_LOOKUP";
 	}
 
+	static String scopeSignature(SemanticBlueprint plan) {
+		if (plan == null || plan.getBindingDependencies() == null || plan.getBindingDependencies().isEmpty()) {
+			return "PROJECT_SAFE";
+		}
+		return plan.getBindingDependencies()
+			.stream()
+			.map(dependency -> String.join("|", Objects.toString(dependency.getScope(), ""),
+					Objects.toString(dependency.getSource(), ""), Objects.toString(dependency.getPrincipalId(), ""),
+					Objects.toString(dependency.getAssetType(), ""), Objects.toString(dependency.getAssetKey(), "")))
+			.sorted()
+			.collect(java.util.stream.Collectors.joining(";"));
+	}
+
 	private String shapeHash(SemanticBlueprint plan) {
 		Map<String, Object> shape = new TreeMap<>();
 		shape.put("models",
@@ -416,6 +453,10 @@ public class QueryCaseCaptureService {
 					.toList()));
 		shape.put("rules", sorted(plan.getRules().stream().map(SemanticBlueprint.RuleSelection::getRuleCode).toList()));
 		shape.put("intent", intentType(plan));
+		shape.put("computationCapabilities", plan.getComputationIntent() == null ? List.of()
+				: plan.getComputationIntent().capabilities().stream().map(Enum::name).sorted().toList());
+		shape.put("computationRequirements", plan.getComputationIntent() == null ? List.of()
+				: plan.getComputationIntent().canonicalRequirements());
 		shape.put("hasTime", plan.getTimeRange() != null);
 		return canonicalJson.hash(shape);
 	}

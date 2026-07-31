@@ -12,11 +12,8 @@ const apiBase = '/api/semevosql';
 axios.interceptors.response.use(
   response => response,
   error => {
-    const status = error?.response?.status;
     const serverMessage = error?.response?.data?.message;
-    if (serverMessage) {
-      error.message = status === 403 ? `权限不足：${serverMessage}` : serverMessage;
-    }
+    if (serverMessage) error.message = serverMessage;
     return Promise.reject(error);
   },
 );
@@ -31,7 +28,6 @@ const governedMutationHeaders = (operation: string) => {
 
 export interface OperatorView {
   operator: string;
-  role: 'VIEWER' | 'EDITOR' | 'REVIEWER' | 'PUBLISHER' | 'ADMIN';
   source: string;
 }
 
@@ -53,14 +49,11 @@ export interface QueryRun {
   projectId?: number;
   projectVersionId?: number;
   episodeId?: string;
-  attemptId?: string;
-  threadId?: string;
   status: string;
   currentNode?: string;
-  lastEventSequence: number;
-  revision: number;
   errorCode?: string;
   errorMessage?: string;
+  retryable?: boolean;
 }
 
 export interface RunEvent {
@@ -175,23 +168,6 @@ export interface ProjectInitializationView {
   nextGap?: { id: number; question: string; gapType: string; status: string };
 }
 
-export type ProjectAccessRole = 'VIEWER' | 'EDITOR' | 'OWNER';
-
-export interface ProjectAccessView {
-  projectId: number;
-  accessRole: ProjectAccessRole;
-  globalAdmin: boolean;
-}
-
-export interface ProjectMembership {
-  projectId: number;
-  operatorId: string;
-  accessRole: ProjectAccessRole;
-  grantedBy: string;
-  createTime: string;
-  updateTime: string;
-}
-
 export interface ProjectHealthSummary {
   projectId: number;
   available: boolean;
@@ -213,8 +189,6 @@ export interface ProjectHealthSummary {
   totalQueries: number;
   querySuccessRate: number;
   correctionCount: number;
-  accessRole: 'VIEWER' | 'EDITOR' | 'OWNER';
-  globalAdmin: boolean;
 }
 
 export interface ProjectHealth {
@@ -640,6 +614,7 @@ export interface QueryExecutionExplanation {
   sqlExecutions: Array<Record<string, unknown>>;
   reusedSteps: string[];
   execution: Record<string, unknown>;
+  resultColumns?: Array<{ key: string; label: string }>;
 }
 
 export interface QueryCorrectionOption {
@@ -687,7 +662,6 @@ interface QueryDiagnosisRepairAction {
   code: string;
   label: string;
   description: string;
-  requiredRole: string;
   enabled: boolean;
   kind: 'CORRECTION' | 'EVOLUTION' | 'REPLAY' | 'RELEASE' | string;
 }
@@ -1202,26 +1176,6 @@ export const semEvoSQLService = {
   },
   async projectHealthSummaries(): Promise<ProjectHealthSummary[]> {
     return (await axios.get(`${apiBase}/projects/health-summary`)).data;
-  },
-  async projectAccess(projectId: number): Promise<ProjectAccessView> {
-    return (await axios.get(`${apiBase}/projects/${projectId}/access`)).data;
-  },
-  async projectMembers(projectId: number): Promise<ProjectMembership[]> {
-    return (await axios.get(`${apiBase}/projects/${projectId}/members`)).data;
-  },
-  async grantProjectMember(
-    projectId: number,
-    memberId: string,
-    accessRole: ProjectAccessRole,
-  ): Promise<ProjectMembership> {
-    return (
-      await axios.put(`${apiBase}/projects/${projectId}/members/${encodeURIComponent(memberId)}`, {
-        accessRole,
-      })
-    ).data;
-  },
-  async revokeProjectMember(projectId: number, memberId: string): Promise<void> {
-    await axios.delete(`${apiBase}/projects/${projectId}/members/${encodeURIComponent(memberId)}`);
   },
   async projectReleaseCenter(projectId: number): Promise<ProjectReleaseCenter> {
     return (await axios.get(`${apiBase}/projects/${projectId}/release-center`)).data;

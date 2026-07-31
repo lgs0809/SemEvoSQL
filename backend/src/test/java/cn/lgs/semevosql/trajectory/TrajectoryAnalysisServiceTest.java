@@ -41,4 +41,18 @@ class TrajectoryAnalysisServiceTest {
 		assertThat(TrajectoryAnalysisService.classifySqlIssue("ENUM_MAPPING_MISSING: status"))
 			.isEqualTo(SemanticIssueType.ENUM_MAPPING_MISSING);
 	}
+
+	@Test
+	void exactSemanticPlanEventCanRestoreBlueprintWhenInitialExecutionSnapshotHadNoPlan() {
+		String payload = """
+				{"canonicalQuery":"monthly growth","executable":true,"sourceSubPlans":[{"datasourceId":2,"modelCodes":["orders"],"physicalTables":["orders"]}]}
+				""";
+
+		var restored = TrajectoryAnalysisService.decodeSemanticPlanSnapshot(payload);
+
+		assertThat(restored).isPresent();
+		assertThat(restored.orElseThrow().getCanonicalQuery()).isEqualTo("monthly growth");
+		assertThat(restored.orElseThrow().getSourceSubPlans()).hasSize(1);
+		assertThat(TrajectoryAnalysisService.decodeSemanticPlanSnapshot("not-json")).isEmpty();
+	}
 }

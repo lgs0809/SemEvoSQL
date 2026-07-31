@@ -18,6 +18,7 @@ package cn.lgs.semevosql.workflow.node;
 import static cn.lgs.semevosql.constant.Constant.ACTIVE_QUERY;
 import static cn.lgs.semevosql.constant.Constant.ACTIVE_TODO_ID;
 import static cn.lgs.semevosql.constant.Constant.ADVANCED_EXECUTION_FALLBACK;
+import static cn.lgs.semevosql.constant.Constant.ATTEMPT_ID;
 import static cn.lgs.semevosql.constant.Constant.APPROVAL_REQUIRED;
 import static cn.lgs.semevosql.constant.Constant.FORCE_SEMANTIC_REPLAN;
 import static cn.lgs.semevosql.constant.Constant.HUMAN_REVIEW_ENABLED;
@@ -42,6 +43,7 @@ import static cn.lgs.semevosql.constant.Constant.TYPED_SEMANTIC_PLAN;
 import cn.lgs.semevosql.review.PostExecutionReview;
 import cn.lgs.semevosql.review.QueryRepairPolicy.RepairBudget;
 import cn.lgs.semevosql.run.QueryRunService;
+import cn.lgs.semevosql.run.RunExecutionFenceService;
 import cn.lgs.semevosql.semantic.domain.SemanticBlueprint;
 import cn.lgs.semevosql.task.QueryTask;
 import cn.lgs.semevosql.task.QueryTaskRepository;
@@ -56,6 +58,7 @@ import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Tiny task boundary used after Post-Execution Review PASS in Todo mode. The node never plans, executes, or generates
@@ -74,7 +77,10 @@ public class TodoBoundaryNode implements NodeAction {
 
 	private final QueryRunService runService;
 
+	private final RunExecutionFenceService executionFence;
+
 	@Override
+	@Transactional
 	public Map<String, Object> apply(OverAllState state) {
 		boolean todoEnabled = state.value(TODO_ENABLED, false);
 		if (!todoEnabled) {
@@ -82,6 +88,10 @@ public class TodoBoundaryNode implements NodeAction {
 		}
 
 		String runId = StateUtil.getStringValue(state, RUN_ID, "");
+		String attemptId = StateUtil.getStringValue(state, ATTEMPT_ID, "");
+		if (!runId.isBlank() && !attemptId.isBlank()) {
+			executionFence.assertActive(runId, attemptId);
+		}
 		QueryTask active = taskRepository.active(runId)
 			.orElseThrow(() -> new IllegalStateException("Todo mode has no ACTIVE task for run " + runId));
 		SemanticBlueprint plan = StateUtil.getObjectValue(state, TYPED_SEMANTIC_PLAN, SemanticBlueprint.class,
@@ -102,7 +112,7 @@ public class TodoBoundaryNode implements NodeAction {
 		accepted.put("resultPayload", StateUtil.getStringValue(state, LAST_SQL_RESULT_PAYLOAD, ""));
 		taskRepository.saveAcceptedResult(runId, active.taskId(), accepted, review);
 		persistAcceptedPlanFacts(runId, active.taskId(), plan);
-		runService.appendEvent(runId, "TODO_COMPLETED", "todo-boundary",
+		runService.appendEvent(runId, attemptId, "TODO_COMPLETED", "todo-boundary",
 				json(Map.of("taskId", active.taskId(), "ordinal", active.ordinal())), "Query Todo completed after Review PASS",
 				"todo-completed:" + runId + ":" + active.taskId());
 
@@ -115,8 +125,11 @@ public class TodoBoundaryNode implements NodeAction {
 		}
 
 		QueryTask nextTask = next.orElseThrow();
+		if (!runId.isBlank() && !attemptId.isBlank()) {
+			executionFence.assertActive(runId, attemptId);
+		}
 		taskRepository.activate(runId, nextTask.taskId());
-		runService.appendEvent(runId, "TODO_ACTIVATED", "todo-boundary",
+		runService.appendEvent(runId, attemptId, "TODO_ACTIVATED", "todo-boundary",
 				json(Map.of("taskId", nextTask.taskId(), "ordinal", nextTask.ordinal())), "Next Query Todo activated",
 				"todo-activated:" + runId + ":" + nextTask.taskId());
 

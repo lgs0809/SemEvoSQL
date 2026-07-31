@@ -19,12 +19,10 @@ import cn.lgs.semevosql.connector.accessor.AbstractAccessor;
 import cn.lgs.semevosql.connector.ddl.DdlFactory;
 import cn.lgs.semevosql.connector.pool.DBConnectionPoolFactory;
 import cn.lgs.semevosql.enums.BizDataSourceTypeEnum;
-import org.springframework.stereotype.Service;
 
 /**
  * @date 2025/12/14 17:34
  */
-@Service("sqlserverAccessor")
 public class SqlServerDBAccessor extends AbstractAccessor {
 
 	private final static String ACCESSOR_TYPE = "SqlServer_Accessor";

@@ -17,6 +17,7 @@ package cn.lgs.semevosql.connector.ddl;
 
 import cn.lgs.semevosql.bo.DbConfigBO;
 import cn.lgs.semevosql.enums.BizDataSourceTypeEnum;
+import cn.lgs.semevosql.service.datasource.SemanticQueryDatasourceCapabilities;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -28,12 +29,22 @@ public class DdlFactory {
 
 	private final Map<String, Ddl> ddlExecutorSet = new ConcurrentHashMap<>();
 
+	private final Map<BizDataSourceTypeEnum, Ddl> ddlByDatasourceType = new ConcurrentHashMap<>();
+
 	public DdlFactory(List<Ddl> ddls) {
 		ddls.forEach(this::registry);
 	}
 
 	public void registry(Ddl ddlExecutor) {
+		if (!SemanticQueryDatasourceCapabilities.supports(ddlExecutor.getDataSourceType().getTypeName())) {
+			return;
+		}
 		ddlExecutorSet.put(ddlExecutor.getDdlType(), ddlExecutor);
+		for (BizDataSourceTypeEnum type : BizDataSourceTypeEnum.values()) {
+			if (ddlExecutor.supportedDataSourceType(type)) {
+				ddlByDatasourceType.put(type, ddlExecutor);
+			}
+		}
 	}
 
 	public boolean isRegistered(String type) {
@@ -48,13 +59,12 @@ public class DdlFactory {
 		return getDdlExecutorByDbType(type);
 	}
 
-	// todo: 写一层缓存
 	public Ddl getDdlExecutorByDbType(BizDataSourceTypeEnum type) {
-		return ddlExecutorSet.values()
-			.stream()
-			.filter(d -> d.supportedDataSourceType(type))
-			.findFirst()
-			.orElseThrow(() -> new IllegalStateException("no ddl executor found for " + type));
+		Ddl ddl = ddlByDatasourceType.get(type);
+		if (ddl == null) {
+			throw new IllegalStateException("no ddl executor found for " + type);
+		}
+		return ddl;
 	}
 
 	public Ddl getDdlExecutorByType(String type) {

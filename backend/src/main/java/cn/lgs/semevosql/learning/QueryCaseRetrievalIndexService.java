@@ -175,9 +175,9 @@ public class QueryCaseRetrievalIndexService {
 				FROM qw_embedding_index_registry
 				WHERE index_scope = 'QUERY_CASE'
 				""");
-		if (registry.isEmpty()) {
-			return new QueryCaseIndexReadiness("LEXICAL_ONLY", approvedCaseCount, 0, null,
-					"Query Case vector index has not been built; Exact/BM25 recall remains available");
+			if (registry.isEmpty()) {
+				return new QueryCaseIndexReadiness("LEXICAL_ONLY", approvedCaseCount, 0, null,
+						"语义向量索引尚未建立；当前仍可使用精确匹配和关键词召回");
 		}
 		Map<String, Object> active = registry.get(0);
 		int dimension = ((Number) active.get("dimension")).intValue();
@@ -186,16 +186,16 @@ public class QueryCaseRetrievalIndexService {
 				&& Objects.equals(configured.model(), Objects.toString(active.get("embedding_model")))
 				&& Objects.equals(configured.version(), Objects.toString(active.get("embedding_version")));
 		long vectorCount = countCurrentVectors(projectId, active, dimension);
-		if (!identityAligned) {
-			return new QueryCaseIndexReadiness("REINDEX_REQUIRED", approvedCaseCount, vectorCount, dimension,
-					"Configured embedding model differs from the active Query Case index; lexical recall remains available");
+			if (!identityAligned) {
+				return new QueryCaseIndexReadiness("REINDEX_REQUIRED", approvedCaseCount, vectorCount, dimension,
+						"当前向量模型与已有索引不一致；重建索引后可恢复完整的语义召回，现阶段仍保留精确匹配能力");
 		}
-		if (vectorCount < approvedCaseCount) {
-			return new QueryCaseIndexReadiness("PARTIAL", approvedCaseCount, vectorCount, dimension,
-					"Some approved Query Cases do not yet have vectors for the active embedding model");
+			if (vectorCount < approvedCaseCount) {
+				return new QueryCaseIndexReadiness("PARTIAL", approvedCaseCount, vectorCount, dimension,
+						"部分已验证案例还没有生成当前模型对应的向量");
 		}
 		return new QueryCaseIndexReadiness("INDEX_READY", approvedCaseCount, vectorCount, dimension,
-				"Query Case vector index is aligned with the active embedding model");
+				"语义向量索引已与当前模型对齐");
 	}
 
 	@Transactional(propagation = Propagation.NOT_SUPPORTED)

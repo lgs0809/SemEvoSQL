@@ -17,9 +17,7 @@ package cn.lgs.semevosql.service.datasource.handler.impl;
 
 import cn.lgs.semevosql.enums.BizDataSourceTypeEnum;
 import cn.lgs.semevosql.service.datasource.handler.DatasourceTypeHandler;
-import org.springframework.stereotype.Component;
 
-@Component
 public class SqlServerDatasourceTypeHandler implements DatasourceTypeHandler {
 
 	@Override

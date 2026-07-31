@@ -3,7 +3,13 @@
  * Licensed under the Apache License, Version 2.0.
  -->
 <template>
-  <section v-if="health" class="project-lifecycle" aria-label="项目准备进度" aria-live="polite">
+  <section
+    v-if="health"
+    class="project-lifecycle"
+    :class="{ compact: compact && health.queryReady }"
+    aria-label="项目准备进度"
+    aria-live="polite"
+  >
     <div class="lifecycle-heading">
       <div>
         <span class="eyebrow">项目进度</span>
@@ -15,11 +21,11 @@
         :type="health.queryReady ? 'primary' : 'default'"
         @click="emit('action', actionTarget)"
       >
-        {{ health.queryReady ? '开始问数' : primaryAction?.label }}
+        {{ health.queryReady ? '打开查询工作台' : primaryAction?.label }}
       </el-button>
     </div>
 
-    <ol class="lifecycle-stages">
+    <ol v-if="!compact || !health.queryReady" class="lifecycle-stages">
       <li v-for="(stage, index) in stages" :key="stage.id" :class="stage.state">
         <div class="stage-marker" aria-hidden="true">
           <i v-if="stage.state === 'done'" class="bi bi-check-lg"></i>
@@ -47,8 +53,9 @@
     defineProps<{
       health?: ProjectHealth;
       showAction?: boolean;
+      compact?: boolean;
     }>(),
-    { health: undefined, showAction: true },
+    { health: undefined, showAction: true, compact: false },
   );
 
   const emit = defineEmits<{
@@ -61,7 +68,7 @@
     props.health?.queryReady ? 'chat' : primaryAction.value?.target,
   );
   const lifecycleTitle = computed(() => {
-    if (props.health?.queryReady) return '项目已准备好，可以稳定进入问数';
+    if (props.health?.queryReady) return '查询入口已就绪';
     const current = stages.value.find(stage => stage.state === 'current');
     return current ? `当前：${current.label}` : '正在读取项目准备状态';
   });
@@ -83,10 +90,27 @@
   .project-lifecycle {
     margin-bottom: 20px;
     padding: 18px 20px;
-    border: 1px solid #dbe4f0;
-    border-radius: 16px;
+    border: 1px solid #dce7e7;
+    border-radius: 14px;
     background: #fff;
     box-shadow: 0 8px 30px rgb(15 23 42 / 4%);
+  }
+  .project-lifecycle.compact {
+    margin-bottom: 14px;
+    padding: 12px 16px;
+    border-color: #d5e9e4;
+    background: #f4fbf9;
+    box-shadow: none;
+  }
+  .project-lifecycle.compact .lifecycle-heading {
+    align-items: center;
+    margin-bottom: 0;
+  }
+  .project-lifecycle.compact .lifecycle-heading strong {
+    font-size: 14px;
+  }
+  .project-lifecycle.compact .lifecycle-heading p {
+    margin-top: 3px;
   }
   .lifecycle-heading {
     display: flex;
@@ -98,7 +122,7 @@
   .eyebrow {
     display: block;
     margin-bottom: 5px;
-    color: #64748b;
+    color: #6f858b;
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.08em;
@@ -106,12 +130,12 @@
   }
   .lifecycle-heading strong {
     display: block;
-    color: #0f172a;
+    color: #17353b;
     font-size: 16px;
   }
   .lifecycle-heading p {
     margin: 6px 0 0;
-    color: #64748b;
+    color: #71858b;
     font-size: 12px;
     line-height: 1.55;
   }
@@ -131,11 +155,11 @@
     padding: 10px;
     border: 1px solid transparent;
     border-radius: 11px;
-    background: #f8fafc;
+    background: #f6f9f9;
   }
   .lifecycle-stages li.current {
-    border-color: #bfdbfe;
-    background: #eff6ff;
+    border-color: #b9e1d9;
+    background: #f1fbf8;
   }
   .lifecycle-stages li.done {
     background: #f8fafc;
@@ -153,11 +177,11 @@
     font-weight: 700;
   }
   .done .stage-marker {
-    background: #dcfce7;
-    color: #15803d;
+    background: #e5f6ee;
+    color: #2b896d;
   }
   .current .stage-marker {
-    background: #2563eb;
+    background: #177d73;
     color: #fff;
   }
   .stage-copy {
@@ -167,7 +191,7 @@
   }
   .stage-copy strong {
     overflow: hidden;
-    color: #334155;
+    color: #3d5962;
     font-size: 12px;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -175,14 +199,14 @@
   .stage-copy small {
     display: -webkit-box;
     overflow: hidden;
-    color: #94a3b8;
+    color: #8a9ba1;
     font-size: 10px;
     line-height: 1.35;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
   }
   .current .stage-copy strong {
-    color: #1d4ed8;
+    color: #177d73;
   }
   @media (max-width: 1100px) {
     .lifecycle-stages {

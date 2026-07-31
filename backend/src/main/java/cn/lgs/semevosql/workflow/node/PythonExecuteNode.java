@@ -19,6 +19,9 @@ import cn.lgs.semevosql.enums.TextType;
 import cn.lgs.semevosql.util.JsonParseUtil;
 import cn.lgs.semevosql.properties.CodeExecutorProperties;
 import cn.lgs.semevosql.run.RunNodeEffectService;
+import cn.lgs.semevosql.run.LateRunResultDroppedException;
+import cn.lgs.semevosql.run.RunDeadlineExceededException;
+import cn.lgs.semevosql.run.RunExecutionFenceService;
 import com.alibaba.cloud.ai.graph.GraphResponse;
 import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.action.NodeAction;
@@ -59,13 +62,17 @@ public class PythonExecuteNode implements NodeAction {
 
 	private final RunNodeEffectService runNodeEffectService;
 
+	private final RunExecutionFenceService executionFence;
+
 	public PythonExecuteNode(CodePoolExecutorService codePoolExecutor, JsonParseUtil jsonParseUtil,
-			CodeExecutorProperties codeExecutorProperties, RunNodeEffectService runNodeEffectService) {
+			CodeExecutorProperties codeExecutorProperties, RunNodeEffectService runNodeEffectService,
+			RunExecutionFenceService executionFence) {
 		this.codePoolExecutor = codePoolExecutor;
 		this.objectMapper = JsonUtil.getObjectMapper();
 		this.jsonParseUtil = jsonParseUtil;
 		this.codeExecutorProperties = codeExecutorProperties;
 		this.runNodeEffectService = runNodeEffectService;
+		this.executionFence = executionFence;
 	}
 
 	@Override
@@ -81,10 +88,13 @@ public class PythonExecuteNode implements NodeAction {
 			int triesCount = StateUtil.getObjectValue(state, PYTHON_TRIES_COUNT, Integer.class, 0);
 			String inputPayload = objectMapper.writeValueAsString(sqlResults);
 			String runId = state.value(RUN_ID, "");
+			String attemptId = StateUtil.getStringValue(state, ATTEMPT_ID, "");
+			assertActiveIfBound(runId, attemptId);
 			String effectKey = "python-execute:" + triesCount;
 			String effectInputHash = runNodeEffectService.inputHash(pythonCode + "|" + inputPayload);
 			String completed = runNodeEffectService.completedPayload(runId, effectKey, effectInputHash).orElse(null);
 			if (completed != null) {
+				assertActiveIfBound(runId, attemptId);
 				return replayPythonExecution(state, readEffect(completed));
 			}
 
@@ -93,6 +103,7 @@ public class PythonExecuteNode implements NodeAction {
 
 			// Run Python code
 			CodePoolExecutorService.TaskResponse taskResponse = this.codePoolExecutor.runTask(taskRequest);
+			assertActiveIfBound(runId, attemptId);
 			if (!taskResponse.isSuccess()) {
 				String errorMsg = "Python Execute Failed!\nStdOut: " + taskResponse.stdOut() + "\nStdErr: "
 						+ taskResponse.stdErr() + "\nExceptionMsg: " + taskResponse.exceptionMsg();
@@ -111,7 +122,7 @@ public class PythonExecuteNode implements NodeAction {
 					});
 
 					PythonExecutionEffect effect = new PythonExecutionEffect(fallbackOutput, false, true);
-					runNodeEffectService.recordCompleted(runId, effectKey, effectInputHash, writeEffect(effect));
+					runNodeEffectService.recordCompleted(runId, attemptId, effectKey, effectInputHash, writeEffect(effect));
 					Flux<GraphResponse<StreamingOutput>> fallbackGenerator = FluxUtil
 						.createStreamingGeneratorWithMessages(this.getClass(), state, v -> effectState(effect),
 								fallbackDisplayFlux);
@@ -146,11 +157,14 @@ public class PythonExecuteNode implements NodeAction {
 			// Create generator using utility class, returning pre-computed business logic
 			// result
 			PythonExecutionEffect effect = new PythonExecutionEffect(finalStdout, true, false);
-			runNodeEffectService.recordCompleted(runId, effectKey, effectInputHash, writeEffect(effect));
+			runNodeEffectService.recordCompleted(runId, attemptId, effectKey, effectInputHash, writeEffect(effect));
 			Flux<GraphResponse<StreamingOutput>> generator = FluxUtil
 				.createStreamingGeneratorWithMessages(this.getClass(), state, v -> effectState(effect), displayFlux);
 
 			return Map.of(PYTHON_EXECUTE_NODE_OUTPUT, generator);
+		}
+		catch (LateRunResultDroppedException | RunDeadlineExceededException late) {
+			throw late;
 		}
 		catch (Exception e) {
 			String errorMessage = e.getMessage() == null || e.getMessage().isBlank() ? e.getClass().getSimpleName()
@@ -173,6 +187,12 @@ public class PythonExecuteNode implements NodeAction {
 					errorDisplayFlux);
 
 			return Map.of(PYTHON_EXECUTE_NODE_OUTPUT, generator);
+		}
+	}
+
+	private void assertActiveIfBound(String runId, String attemptId) {
+		if (runId != null && !runId.isBlank() && attemptId != null && !attemptId.isBlank()) {
+			executionFence.assertActive(runId, attemptId);
 		}
 	}
 

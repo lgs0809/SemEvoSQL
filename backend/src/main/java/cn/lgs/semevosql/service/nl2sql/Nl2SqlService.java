@@ -34,6 +34,12 @@ public interface Nl2SqlService {
 	Flux<ChatResponse> fineSelect(SchemaDTO schemaDTO, String query, String evidence,
 			String sqlGenerateSchemaMissingAdvice, DbConfigBO specificDbConfig, Consumer<SchemaDTO> dtoConsumer);
 
+	default Flux<ChatResponse> fineSelect(SchemaDTO schemaDTO, String query, String evidence,
+			String sqlGenerateSchemaMissingAdvice, DbConfigBO specificDbConfig, Consumer<SchemaDTO> dtoConsumer,
+			Long runDeadlineEpochMillis) {
+		return fineSelect(schemaDTO, query, evidence, sqlGenerateSchemaMissingAdvice, specificDbConfig, dtoConsumer);
+	}
+
 	default String sqlTrim(String sql) {
 		return MarkdownParserUtil.extractRawText(sql).trim();
 	}

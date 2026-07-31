@@ -42,15 +42,25 @@ export interface ModelConfig {
   lastValidationTime?: string;
 }
 
+export type ModelReadinessStatus =
+  | 'NOT_CONFIGURED'
+  | 'CONFIGURED'
+  | 'VERIFIED'
+  | 'STALE'
+  | 'UNAVAILABLE';
+
 interface ModelCheckReady {
   chatModelConfigured: boolean;
   chatModelReady: boolean;
+  chatModelStatus: ModelReadinessStatus;
   chatModelLastValidationTime?: string;
   embeddingModelConfigured: boolean;
   embeddingModelReady: boolean;
+  embeddingModelStatus: ModelReadinessStatus;
   embeddingModelLastValidationTime?: string;
   rerankModelConfigured: boolean;
   rerankModelReady: boolean;
+  rerankModelStatus: ModelReadinessStatus;
   rerankModelLastValidationTime?: string;
   ready: boolean;
 }
@@ -120,10 +130,13 @@ class ModelConfigService {
       response.data.data || {
         chatModelConfigured: false,
         chatModelReady: false,
+        chatModelStatus: 'NOT_CONFIGURED',
         embeddingModelConfigured: false,
         embeddingModelReady: false,
+        embeddingModelStatus: 'NOT_CONFIGURED',
         rerankModelConfigured: false,
         rerankModelReady: false,
+        rerankModelStatus: 'NOT_CONFIGURED',
         ready: false,
       }
     );

@@ -33,10 +33,10 @@ public class OperatorContextController {
 	@GetMapping("/operator-context")
 	public OperatorView current(@RequestHeader HttpHeaders headers, Principal principal) {
 		OperatorContext context = operatorResolver.resolve(headers, principal, "operator-context");
-		return new OperatorView(context.operator(), context.role(), context.source());
+		return new OperatorView(context.operator(), context.source());
 	}
 
-	public record OperatorView(String operator, OperatorRole role, String source) {
+	public record OperatorView(String operator, String source) {
 	}
 
 }

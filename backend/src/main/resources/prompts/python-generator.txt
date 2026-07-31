@@ -16,7 +16,7 @@
        traceback.print_exc(file=sys.stderr)
        sys.exit(1)
    ```
-5. **依赖限制**：所有使用的库必须是`continuumio/anaconda3`默认安装的库，如`pandas`, `numpy`, `json`, `sys`等。
+5. **依赖限制**：运行环境是版本固定的 SemEvoSQL Python Runner，只允许使用其中预装的`pandas`、`numpy`和 Python 标准库（如`json`、`sys`、`traceback`）；禁止要求或尝试安装额外依赖。
 6. **动态处理**：禁止硬编码列名/值，所有逻辑基于输入数据动态构建。
 7. **安全限制**：禁止以下操作：
    - 任何文件/网络操作（open/requests等）。

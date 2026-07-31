@@ -2,10 +2,10 @@
   <div class="mcp-panel" v-loading="loading">
     <div class="mcp-heading">
       <div>
-        <h2>外部 Agent 接入</h2>
-        <p>将当前 Project 已发布的问数能力作为 Remote MCP Server 提供给外部 Agent。</p>
+        <h2>外部智能助手接入</h2>
+        <p>将当前项目的查询能力提供给外部智能助手，并沿用同一套语义校验与执行链。</p>
       </div>
-      <el-tag v-if="deployment" :type="statusType" effect="plain">{{ deployment.status }}</el-tag>
+      <el-tag v-if="deployment" :type="statusType" effect="plain">{{ statusLabel }}</el-tag>
     </div>
 
     <el-alert
@@ -13,12 +13,12 @@
       type="warning"
       show-icon
       :closable="false"
-      title="Project 必须处于 READY 且存在 PUBLISHED 版本后才能部署。"
+      title="项目需要先完成准备并拥有可用的业务模型后才能部署。"
     />
 
     <el-empty
       v-if="!deployment || deployment.status === 'REVOKED'"
-      description="尚未部署 MCP Server"
+      description="尚未启用外部智能助手接入"
     >
       <el-button
         type="primary"
@@ -26,28 +26,22 @@
         :loading="submitting"
         @click="deploy"
       >
-        部署 MCP Server
+        启用 MCP 接入
       </el-button>
     </el-empty>
 
     <template v-else>
       <el-descriptions :column="1" border class="deployment-details">
-        <el-descriptions-item label="Endpoint">
+        <el-descriptions-item label="接入地址">
           <div class="copy-row">
             <code>{{ deployment.endpoint }}</code>
             <el-button link @click="copy(deployment.endpoint)">复制</el-button>
           </div>
         </el-descriptions-item>
-        <el-descriptions-item label="绑定版本">
-          {{ deployment.projectVersionId }}
-        </el-descriptions-item>
-        <el-descriptions-item label="Service Principal">
-          {{ deployment.principalId }}
-        </el-descriptions-item>
         <el-descriptions-item label="最近使用">
           {{ deployment.lastUsedTime || '尚未调用' }}
         </el-descriptions-item>
-        <el-descriptions-item label="重启恢复">
+        <el-descriptions-item label="最近恢复">
           {{ deployment.lastRecoveredTime || '无需恢复' }}
         </el-descriptions-item>
       </el-descriptions>
@@ -56,13 +50,13 @@
         <div class="operations-heading">
           <div>
             <strong>运行与凭据状态</strong>
-            <span>只展示持久化运行事实与审计记录，不回显 Credential。</span>
+            <span>访问凭据不会再次回显；运行与审计记录可在这里查看。</span>
           </div>
           <el-button link :loading="testing" @click="loadOperations">刷新</el-button>
         </div>
         <div class="operations-grid">
           <div>
-            <span>Credential 到期</span>
+            <span>访问凭据到期</span>
             <strong>
               {{
                 operations.credentialExpiresAt
@@ -72,11 +66,11 @@
             </strong>
           </div>
           <div>
-            <span>累计问数</span>
+            <span>累计查询</span>
             <strong>{{ operations.totalQueries }}</strong>
           </div>
           <div>
-            <span>失败问数</span>
+            <span>失败查询</span>
             <strong>{{ operations.failedQueries }}</strong>
           </div>
           <div>
@@ -103,13 +97,13 @@
         type="success"
         show-icon
         :closable="false"
-        title="Credential 只显示这一次，请立即保存。"
+        title="访问凭据只显示这一次，请立即保存。"
         class="credential-alert"
       >
         <template #default>
           <div class="secret-row">
             <code>{{ credential }}</code>
-            <el-button size="small" @click="copy(credential)">复制 Credential</el-button>
+            <el-button size="small" @click="copy(credential)">复制访问凭据</el-button>
           </div>
           <div class="secret-row">
             <code>{{ connectionConfig }}</code>
@@ -123,14 +117,14 @@
         type="info"
         show-icon
         :closable="false"
-        title="系统不会再次返回已有 Credential；如已遗失，请轮换 Credential。"
+        title="系统不会再次返回已有访问凭据；如已遗失，请重新生成。"
         class="credential-alert"
       />
 
       <div class="tool-contract">
-        <strong>Production MCP Tools</strong>
-        <el-tag effect="plain">query</el-tag>
-        <el-tag effect="plain">query_status</el-tag>
+        <strong>可用 MCP 工具</strong>
+        <span class="tool-contract-item"><span>查询</span><code>query</code></span>
+        <span class="tool-contract-item"><span>查询状态</span><code>query_status</code></span>
       </div>
 
       <div class="actions">
@@ -153,7 +147,7 @@
           启用
         </el-button>
         <el-button :disabled="!canManage" :loading="submitting" @click="rotate">
-          轮换 Credential
+          重新生成访问凭据
         </el-button>
         <el-button type="danger" plain :disabled="!canManage" :loading="submitting" @click="revoke">
           删除 / 撤销
@@ -193,6 +187,12 @@
     if (deployment.value?.status === 'DISABLED') return 'warning';
     return 'info';
   });
+  const statusLabel = computed(() => {
+    if (deployment.value?.status === 'RUNNING') return '运行中';
+    if (deployment.value?.status === 'DISABLED') return '已停用';
+    if (deployment.value?.status === 'REVOKED') return '已撤销';
+    return deployment.value?.status || '';
+  });
 
   const connectionConfig = computed(() => {
     if (!credentialConfig.value) return '';
@@ -223,7 +223,7 @@
       deployment.value = await projectMcpService.get(props.projectId);
       await loadOperations();
     } catch (error) {
-      ElMessage.error(getApiErrorMessage(error, '读取 MCP Deployment 失败'));
+      ElMessage.error(getApiErrorMessage(error, '读取 MCP 接入状态失败'));
     } finally {
       loading.value = false;
     }
@@ -240,7 +240,7 @@
     try {
       reveal(await projectMcpService.deploy(props.projectId));
       await loadOperations();
-      ElMessage.success('MCP Server 已部署');
+      ElMessage.success('MCP 接入已启用');
     } catch (error) {
       ElMessage.error(getApiErrorMessage(error, '部署失败'));
     } finally {
@@ -253,7 +253,7 @@
     try {
       deployment.value = await projectMcpService.enable(props.projectId);
       await loadOperations();
-      ElMessage.success('MCP Server 已启用');
+      ElMessage.success('MCP 接入已启用');
     } catch (error) {
       ElMessage.error(getApiErrorMessage(error, '启用失败'));
     } finally {
@@ -266,7 +266,7 @@
     try {
       deployment.value = await projectMcpService.disable(props.projectId);
       await loadOperations();
-      ElMessage.success('MCP Server 已停用');
+      ElMessage.success('MCP 接入已停用');
     } catch (error) {
       ElMessage.error(getApiErrorMessage(error, '停用失败'));
     } finally {
@@ -275,14 +275,14 @@
   }
 
   async function rotate() {
-    await ElMessageBox.confirm('旧 Credential 会立即失效，确定继续？', '轮换 Credential', {
+    await ElMessageBox.confirm('旧访问凭据会立即失效，确定继续？', '重新生成访问凭据', {
       type: 'warning',
     });
     submitting.value = true;
     try {
       reveal(await projectMcpService.rotateCredential(props.projectId));
       await loadOperations();
-      ElMessage.success('Credential 已轮换');
+      ElMessage.success('访问凭据已重新生成');
     } catch (error) {
       ElMessage.error(getApiErrorMessage(error, '轮换失败'));
     } finally {
@@ -292,8 +292,8 @@
 
   async function revoke() {
     await ElMessageBox.confirm(
-      '该 Deployment 会被撤销，现有 Credential 立即失效。',
-      '删除 MCP Deployment',
+      '该 MCP 接入会被撤销，现有访问凭据立即失效。',
+      '撤销 MCP 接入',
       {
         type: 'warning',
       },
@@ -305,7 +305,7 @@
       credentialConfig.value = undefined;
       operations.value = undefined;
       await load();
-      ElMessage.success('MCP Deployment 已撤销');
+      ElMessage.success('MCP 接入已撤销');
     } catch (error) {
       ElMessage.error(getApiErrorMessage(error, '撤销失败'));
     } finally {
@@ -318,9 +318,9 @@
     try {
       const result = await projectMcpService.check(props.projectId);
       if (result.ok) {
-        ElMessage.success('Deployment 运行状态与当前 Published Catalog 绑定正常');
+        ElMessage.success('MCP 接入状态正常');
       } else {
-        ElMessage.warning('Deployment 状态或 Catalog 绑定已失效，请检查后重新启用');
+        ElMessage.warning('MCP 接入当前不可用，请检查项目状态后重新启用');
       }
     } catch (error) {
       ElMessage.error(getApiErrorMessage(error, '部署状态检查失败'));
@@ -373,6 +373,26 @@
     align-items: center;
     gap: 10px;
     flex-wrap: wrap;
+  }
+
+  .tool-contract {
+    align-items: baseline;
+  }
+
+  .tool-contract-item {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 5px 9px;
+    border: 1px solid var(--el-border-color-lighter);
+    border-radius: 8px;
+    background: var(--el-fill-color-light);
+    color: var(--el-text-color-primary);
+  }
+
+  .tool-contract-item code {
+    color: var(--el-text-color-secondary);
+    font-size: 11px;
   }
 
   .copy-row code,

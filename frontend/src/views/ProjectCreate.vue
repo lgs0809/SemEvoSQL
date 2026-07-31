@@ -36,24 +36,24 @@
           <el-step title="项目" />
           <el-step title="数据连接" />
           <el-step title="业务资料" />
-          <el-step title="开始理解" />
+          <el-step title="启动理解" />
         </el-steps>
 
         <div class="step-content">
           <el-form v-if="activeStep === 0" label-position="top" :model="form">
             <div class="intro-block">
-              <h2>这个项目要解决什么问数需求？</h2>
+              <h2>这个项目要回答什么业务问题？</h2>
               <p>项目名称和数据库连接是必要信息；其余工程参数会使用安全默认值。</p>
             </div>
             <el-form-item label="项目名称" required>
-              <el-input v-model="form.name" size="large" placeholder="例如：订单与财务分析" />
+              <el-input v-model="form.name" size="large" placeholder="输入项目名称" />
             </el-form-item>
             <el-form-item label="项目描述（可选）">
               <el-input
                 v-model="form.description"
                 type="textarea"
                 :rows="4"
-                placeholder="例如：用于订单收入、退款、渠道和财务确认口径分析"
+                placeholder="说明项目要解决的业务问题和分析范围（可选）"
               />
             </el-form-item>
 
@@ -73,12 +73,12 @@
                     <el-select
                       v-model="form.initializationModelId"
                       filterable
-                      placeholder="平台默认 Chat Model"
+                      placeholder="平台默认对话模型"
                     >
                       <el-option
                         v-for="model in chatModels"
                         :key="model.id"
-                        :label="`${model.provider} / ${model.modelName}`"
+                        :label="modelDisplayLabel(model)"
                         :value="model.id"
                       />
                     </el-select>
@@ -111,7 +111,7 @@
               type="info"
               show-icon
               :closable="false"
-              title="资料类型会根据文件名和扩展名自动识别，你也可以手动修正。运行时问数只使用发布后的结构化业务模型。"
+              title="资料类型会根据文件名和扩展名自动识别，你也可以手动修正。正式查询只使用发布后的结构化业务模型。"
             />
             <el-card
               v-for="(item, index) in documents"
@@ -163,7 +163,7 @@
                     <el-form-item label="来源位置">
                       <el-input
                         v-model="item.sourceLocation"
-                        placeholder="例如：第 3 章 / 指标定义表"
+                        placeholder="填写资料所在章节、页码或表格位置"
                       />
                     </el-form-item>
                   </div>
@@ -178,7 +178,7 @@
 
           <div v-else class="ready-step">
             <div class="intro-block">
-              <h2>准备开始理解项目</h2>
+              <h2>准备启动业务理解</h2>
               <p>
                 接下来会使用真实数据库结构和你提供的资料构建业务模型，并生成必要的业务澄清问题。
               </p>
@@ -228,7 +228,7 @@
             下一步
           </el-button>
           <el-button v-else type="primary" :loading="submitting" @click="createProject">
-            创建并开始理解
+            创建项目并启动理解
           </el-button>
         </div>
       </el-card>
@@ -248,6 +248,7 @@
   import modelConfigService, { type ModelConfig } from '@/services/modelConfig';
   import { getApiErrorMessage } from '@/services/common';
   import { semEvoSQLService, type ProjectDocumentType } from '@/services/semevosql';
+  import { datasourceDisplayName, datasourceTypeLabel } from '@/services/displayLabels';
 
   interface DatasourceBindingDraft {
     key: number;
@@ -306,9 +307,9 @@
   const modelReadinessMessage = computed(() => {
     const missing: string[] = [];
     if (!platformReadiness.value?.chatModelReady || chatModels.value.length === 0)
-      missing.push('Chat Model');
-    if (!platformReadiness.value?.embeddingModelReady) missing.push('Embedding Model');
-    if (!platformReadiness.value?.rerankModelReady) missing.push('Rerank Model');
+      missing.push('对话模型');
+    if (!platformReadiness.value?.embeddingModelReady) missing.push('向量模型');
+    if (!platformReadiness.value?.rerankModelReady) missing.push('重排模型');
     return missing.length
       ? `${missing.join('、')} 当前不可用。可以查看已有项目，但创建和项目理解需要先恢复这些模型能力。`
       : '模型能力状态暂时无法确认，请检查系统模型配置。';
@@ -332,7 +333,7 @@
         item.domainCode.trim() ||
         (index === 0 ? form.businessDomain : `${form.businessDomain}-${index + 1}`);
       item.domainName = item.domainName.trim() || form.name;
-      item.responsibility = item.responsibility.trim() || `提供${form.name}问数所需业务数据`;
+      item.responsibility = item.responsibility.trim() || `为${form.name}查询提供业务数据`;
     });
   };
 
@@ -354,7 +355,7 @@
       }
       ids.add(item.datasourceId);
       if (item.exposedTables.length === 0) {
-        ElMessage.warning('每个数据连接至少选择一张参与问数的表');
+      ElMessage.warning('每个数据连接至少选择一张供查询使用的表');
         return false;
       }
     }
@@ -398,12 +399,28 @@
 
   const datasourceName = (datasourceId?: number) => {
     const datasource = availableDatasources.value.find(item => item.id === datasourceId);
-    return datasource?.name || (datasourceId ? `连接 ${datasourceId}` : '未选择');
+    return datasource
+      ? `${datasourceDisplayName(datasource)} · ${datasourceTypeLabel(datasource.type)}`
+      : datasourceId
+        ? `数据连接 ${datasourceId}`
+        : '未选择';
+  };
+
+  const modelDisplayLabel = (model: ModelConfig) => {
+    const provider = String(model.provider || '').toLowerCase();
+    const providerLabel = provider.includes('openai')
+      ? 'OpenAI 对话模型'
+      : provider.includes('deepseek')
+        ? 'DeepSeek 对话模型'
+        : provider.includes('qwen') || provider.includes('local')
+          ? '本地模型服务'
+          : model.provider || '自定义模型服务';
+    return `${providerLabel} · ${model.modelName}`;
   };
 
   const nextStep = () => {
     if (!platformReadiness.value?.ready) {
-      ElMessage.warning('Chat Model、Embedding Model 与 Rerank Model 均准备好后才能开始创建项目');
+      ElMessage.warning('对话模型、向量模型与重排模型均准备好后才能开始创建项目');
       return;
     }
     if (activeStep.value === 0) {
@@ -412,7 +429,7 @@
         return;
       }
       if (!form.initializationModelId) {
-        ElMessage.warning('没有可用的 Chat Model，请先完成模型配置');
+      ElMessage.warning('没有可用的对话模型，请先完成模型配置');
         return;
       }
       ensureGeneratedFields();
@@ -427,7 +444,7 @@
             datasourceId: undefined,
             domainCode: form.businessDomain,
             domainName: form.name,
-            responsibility: `提供${form.name}问数所需业务数据`,
+            responsibility: `为${form.name}查询提供业务数据`,
             priority: 100,
             exposedTables: [],
             tableOptions: [],

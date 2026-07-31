@@ -49,6 +49,21 @@ class SqlResultValidatorTest {
 	}
 
 	@Test
+	void advancedExecutionStillRequiresMinimumExpectedColumnsForNonEmptyResults() {
+		ResultSetBO renamedMetric = ResultSetBO.builder()
+			.column(List.of("pay_time_month", "current_paid_amount", "month_over_month_growth_rate"))
+			.data(List.of(Map.of("pay_time_month", "2026-08-01", "current_paid_amount", "120",
+					"month_over_month_growth_rate", "20")))
+			.build();
+
+		SqlResultValidator.ValidationResult result = validator.validate(renamedMetric, plan(), 1000,
+				ValidationMode.ADVANCED_EXECUTION);
+
+		assertFalse(result.valid());
+		assertTrue(result.errors().contains("Expected result column is missing: paid_amount"));
+	}
+
+	@Test
 	void advancedExecutionAllowsPlannerToOverrideTypedPlanLimitAndOrdering() {
 		ResultSetBO resultSet = ResultSetBO.builder()
 			.column(List.of("paid_at_day", "effective_paid_amount", "previous_day_effective_paid_amount"))

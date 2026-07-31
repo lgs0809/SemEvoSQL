@@ -46,6 +46,8 @@ public class QueryRunController {
 
 	private final QueryRunService runService;
 
+	private final QueryRunPublicPresenter publicPresenter;
+
 	private final GraphService graphService;
 
 	private final ThreadExecutionGuardService threadExecutionGuardService;
@@ -56,11 +58,11 @@ public class QueryRunController {
 
 	private final OperatorContext.Resolver operatorResolver;
 
-	private final RuntimeMutationAuthorizationService runtimeMutationAuthorizationService;
+	private final RuntimeMutationScopeService runtimeMutationScope;
 
 	@GetMapping("/{runId}")
-	public QueryRun get(@PathVariable String runId) {
-		return runService.get(runId);
+	public QueryRunPublicView get(@PathVariable String runId) {
+		return publicPresenter.present(runService.get(runId));
 	}
 
 	@GetMapping("/{runId}/events")
@@ -84,10 +86,10 @@ public class QueryRunController {
 	}
 
 	@PostMapping("/{runId}/cancel")
-	public QueryRun cancel(@PathVariable String runId, @Valid @RequestBody RunCommandRequest request,
+	public QueryRunPublicView cancel(@PathVariable String runId, @Valid @RequestBody RunCommandRequest request,
 			@RequestHeader HttpHeaders headers, Principal principal) {
 		OperatorContext operator = operatorResolver.resolve(headers, principal, "run-cancel:" + runId);
-		runtimeMutationAuthorizationService.requireRunOwnerOrAdmin(runId, operator);
+		runtimeMutationScope.requireRun(runId, operator);
 		QueryRun run = runService.cancel(runId, request.idempotencyKey());
 		if (run.status() == QueryRun.RunStatus.CANCEL_REQUESTED) {
 			recordSqlCancellation(runId, run.currentNode(), request.idempotencyKey());
@@ -102,7 +104,7 @@ public class QueryRunController {
 				multiTurnContextManager.discardRun(run.runId(), run.threadId());
 				threadExecutionGuardService.release(run.threadId(), run.runId());
 			}
-			return run;
+			return publicPresenter.present(run);
 		}
 		if (run.threadId() != null && !run.threadId().isBlank()) {
 			graphService.stopStreamProcessing(run.threadId());
@@ -113,7 +115,7 @@ public class QueryRunController {
 				"run-cancelled:" + cancelled.runId());
 		multiTurnContextManager.discardRun(cancelled.runId(), cancelled.threadId());
 		threadExecutionGuardService.release(cancelled.threadId(), cancelled.runId());
-		return cancelled;
+		return publicPresenter.present(cancelled);
 	}
 
 	private void completeCancelledEpisode(QueryRun run) {
@@ -125,11 +127,11 @@ public class QueryRunController {
 	}
 
 	@PostMapping("/{runId}/resume")
-	public QueryRun resume(@PathVariable String runId, @Valid @RequestBody RunCommandRequest request,
+	public QueryRunPublicView resume(@PathVariable String runId, @Valid @RequestBody RunCommandRequest request,
 			@RequestHeader HttpHeaders headers, Principal principal) {
 		OperatorContext operator = operatorResolver.resolve(headers, principal, "run-resume:" + runId);
-		runtimeMutationAuthorizationService.requireRunOwnerOrAdmin(runId, operator);
-		return runService.resume(runId, request.idempotencyKey());
+		runtimeMutationScope.requireRun(runId, operator);
+		return publicPresenter.present(runService.resume(runId, request.idempotencyKey()));
 	}
 
 	private void recordSqlCancellation(String runId, String currentNode, String idempotencyKey) {

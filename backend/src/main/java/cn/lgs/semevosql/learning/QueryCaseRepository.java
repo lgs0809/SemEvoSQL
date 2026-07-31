@@ -218,6 +218,18 @@ public class QueryCaseRepository {
 				&& assetReferences.fingerprintEvidenceCompatible(id, catalogHash);
 	}
 
+	public List<Map<String, Object>> bindingDependencies(String queryCaseId) {
+		if (!StringUtils.hasText(queryCaseId)) {
+			return List.of();
+		}
+		return jdbc.queryForList("""
+				SELECT binding_scope, binding_source, principal_id
+				FROM qw_query_case_binding_dependency
+				WHERE query_example_id = ?
+				ORDER BY id
+				""", queryCaseId);
+	}
+
 	public JdbcTemplate jdbc() {
 		return jdbc;
 	}

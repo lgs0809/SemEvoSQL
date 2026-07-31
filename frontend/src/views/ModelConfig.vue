@@ -21,8 +21,8 @@
         <!-- 内容头部 -->
         <div class="content-header">
           <div class="header-info">
-            <h1 class="content-title">模型配置管理</h1>
-            <p class="content-subtitle">配置和管理AI模型参数，支持多种模型提供商</p>
+            <h1 class="content-title">模型服务</h1>
+            <p class="content-subtitle">管理对话、向量和重排模型，并在接入前验证实时可用性。</p>
           </div>
         </div>
 
@@ -45,9 +45,9 @@
                   style="width: 300px"
                 >
                   <el-option label="全部" value="" />
-                  <el-option label="对话模型 (CHAT)" value="CHAT" />
-                  <el-option label="嵌入模型 (EMBEDDING)" value="EMBEDDING" />
-                  <el-option label="重排模型 (RERANK)" value="RERANK" />
+                  <el-option label="对话模型" value="CHAT" />
+                  <el-option label="向量模型" value="EMBEDDING" />
+                  <el-option label="重排模型" value="RERANK" />
                 </el-select>
               </div>
             </div>
@@ -78,10 +78,10 @@
                       <el-descriptions-item v-if="scope.row.modelType === 'CHAT'" label="温度">
                         {{ scope.row.temperature ?? 0 }}
                       </el-descriptions-item>
-                      <el-descriptions-item v-if="scope.row.modelType === 'CHAT'" label="最大 Token">
+                      <el-descriptions-item v-if="scope.row.modelType === 'CHAT'" label="最大输出长度（Token）">
                         {{ scope.row.maxTokens || 2000 }}
                       </el-descriptions-item>
-                      <el-descriptions-item label="API Key">
+                      <el-descriptions-item label="密钥状态">
                         {{
                           scope.row.apiKeyConfigured ? scope.row.apiKeyHint || '已配置' : '未配置'
                         }}
@@ -100,7 +100,9 @@
               <el-table-column label="模型" min-width="240">
                 <template #default="scope">
                   <strong>{{ scope.row.modelName }}</strong>
-                  <div class="model-meta">{{ scope.row.provider }}</div>
+                  <div class="model-meta">
+                    {{ providerLabel(scope.row.provider, scope.row.modelType) }}
+                  </div>
                 </template>
               </el-table-column>
               <el-table-column label="用途" width="130">
@@ -111,7 +113,7 @@
                   >
                     {{
                       scope.row.modelType === 'CHAT'
-                        ? '业务理解 / 问数'
+                        ? '业务理解 / 查询'
                         : scope.row.modelType === 'EMBEDDING'
                           ? '语义向量'
                           : '语义重排'
@@ -208,7 +210,7 @@
               <el-option label="Qwen" value="qwen" />
               <el-option label="OpenAI" value="openai" />
               <el-option label="Siliconflow" value="siliconflow" />
-              <el-option label="Custom" value="custom" />
+              <el-option label="自定义" value="custom" />
             </el-select>
           </el-form-item>
 
@@ -236,16 +238,16 @@
             />
           </el-form-item>
 
-          <el-form-item label="Base URL" prop="baseUrl">
+          <el-form-item label="服务地址（Base URL）" prop="baseUrl">
             <el-input
               v-model="formData.baseUrl"
-              placeholder="填写模型服务 Base URL，例如 https://api.example.com"
+              placeholder="填写模型服务地址，例如 https://api.example.com"
             />
           </el-form-item>
 
           <el-form-item
             v-if="formData.modelType === 'CHAT'"
-            label="Completions路径"
+            label="对话接口路径"
             prop="completionsPath"
           >
             <el-input
@@ -256,19 +258,19 @@
 
           <el-form-item
             v-if="formData.modelType === 'EMBEDDING'"
-            label="Embeddings 路径"
+            label="向量模型路径"
             prop="embeddingsPath"
           >
             <el-input
               v-model="formData.embeddingsPath"
-              placeholder="附加到 Base URL 的路径；留空使用 /v1/embeddings"
+              placeholder="附加到服务地址的路径；留空使用 /v1/embeddings"
             />
           </el-form-item>
 
-          <el-form-item v-if="formData.modelType === 'RERANK'" label="Rerank 路径" prop="rerankPath">
+          <el-form-item v-if="formData.modelType === 'RERANK'" label="重排模型路径" prop="rerankPath">
             <el-input
               v-model="formData.rerankPath"
-              placeholder="附加到 Base URL 的路径；留空使用 /v1/rerank"
+              placeholder="附加到服务地址的路径；留空使用 /v1/rerank"
             />
           </el-form-item>
 
@@ -280,7 +282,7 @@
               :step="5"
               style="width: 100%"
             />
-            <div class="form-tip">单次模型请求超时，单位秒；适用于 Chat、Embedding 和 Rerank。</div>
+            <div class="form-tip">单次模型请求超时，单位秒；适用于对话、向量和重排模型。</div>
           </el-form-item>
 
           <el-form-item v-if="formData.modelType === 'CHAT'" label="温度" prop="temperature">
@@ -295,7 +297,7 @@
             <div class="form-tip">建议默认0。控制生成文本的随机性，值越高越随机</div>
           </el-form-item>
 
-          <el-form-item v-if="formData.modelType === 'CHAT'" label="最大 Token" prop="maxTokens">
+          <el-form-item v-if="formData.modelType === 'CHAT'" label="最大输出长度（Token）" prop="maxTokens">
             <el-input-number
               v-model="formData.maxTokens"
               :min="100"
@@ -312,7 +314,7 @@
         <el-form-item label="启用代理">
           <el-switch v-model="formData.proxyEnabled" />
           <span class="form-tip" style="margin-left: 10px">
-            如果您的服务器处于受限内网，请开启代理以连接 AI 服务
+            如果您的服务器处于受限内网，请开启代理以连接模型服务
           </span>
         </el-form-item>
 
@@ -649,6 +651,21 @@
           ? `最近验证：${new Date(value.replace(' ', 'T')).toLocaleString('zh-CN')}`
           : '尚无真实验证记录';
 
+      const providerLabel = (provider?: string, modelType?: ModelConfig['modelType']) => {
+        const normalized = String(provider || '').trim().toLowerCase();
+        if (normalized.includes('openai') && modelType === 'CHAT') return 'OpenAI · 对话模型';
+        if (normalized.includes('embedding')) return '本地 · 向量模型';
+        if (normalized.includes('rerank')) return '本地 · 重排模型';
+        if (normalized === 'openai') return 'OpenAI';
+        if (normalized === 'deepseek') return 'DeepSeek';
+        if (normalized === 'qwen') return 'Qwen';
+        if (normalized === 'siliconflow') return 'SiliconFlow';
+        if (!provider) {
+          return modelType === 'CHAT' ? '对话模型' : modelType === 'EMBEDDING' ? '向量模型' : '重排模型';
+        }
+        return /[\u3400-\u9fff]/.test(provider) ? provider : '自定义模型服务';
+      };
+
       // 生命周期
       onMounted(() => {
         loadConfigs();
@@ -678,6 +695,7 @@
         validationTagType,
         validationLabel,
         validationTime,
+        providerLabel,
         updateBaseUrlByProvider,
         Plus,
         Refresh,

@@ -13,20 +13,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package cn.lgs.semevosql.project.security;
+package cn.lgs.semevosql.run;
 
-public enum ProjectAccessRole {
+import java.util.concurrent.TimeoutException;
 
-	VIEWER(10), EDITOR(20), OWNER(30);
+/** Absolute interactive Run deadline exhausted. */
+public class RunDeadlineExceededException extends IllegalStateException {
 
-	private final int authority;
-
-	ProjectAccessRole(int authority) {
-		this.authority = authority;
+	public RunDeadlineExceededException(String message) {
+		super(message, new TimeoutException(message));
 	}
-
-	public boolean atLeast(ProjectAccessRole required) {
-		return authority >= required.authority;
-	}
-
 }

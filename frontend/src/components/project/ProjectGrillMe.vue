@@ -10,11 +10,11 @@
         <p>系统已经先从数据库和业务资料中自动理解，只需要你确认无法安全推断的关键业务规则。</p>
       </div>
       <div class="toolbar-actions">
-        <el-select v-model="selectedVersionId" @change="load">
+        <el-select v-model="selectedVersionId" placeholder="选择版本" @change="load">
           <el-option
             v-for="version in versions"
             :key="version.id"
-            :label="`${version.versionNumber} · ${version.status}`"
+            :label="`${version.versionNumber} · ${versionStatusLabel(version.status)}`"
             :value="version.id"
           />
         </el-select>
@@ -136,6 +136,7 @@
     type OnboardingView,
     type SemanticProjectVersion,
   } from '@/services/semevosql';
+  import { versionStatusLabel } from '@/services/displayLabels';
 
   const props = defineProps<{
     projectId: number;

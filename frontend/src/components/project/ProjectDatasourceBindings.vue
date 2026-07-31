@@ -10,11 +10,16 @@
         <p>为每个业务模型版本指定数据源职责、优先级和允许使用的物理表。</p>
       </div>
       <div class="toolbar-actions">
-        <el-select v-model="selectedVersionId" class="version-select" @change="loadBindings">
+        <el-select
+          v-model="selectedVersionId"
+          class="version-select"
+          placeholder="选择版本"
+          @change="loadBindings"
+        >
           <el-option
             v-for="version in versions"
             :key="version.id"
-            :label="`${version.versionNumber} · ${version.status}`"
+            :label="`${version.versionNumber} · ${versionStatusLabel(version.status)}`"
             :value="version.id"
           />
         </el-select>
@@ -31,7 +36,7 @@
       :title="
         selectedVersion?.status !== 'DRAFT'
           ? '正式或已验证的业务模型保持只读；请创建新草稿后修改数据源。'
-          : '当前账号只有查看权限，不能修改数据源绑定。'
+          : '当前运行权限仅允许查看，不能修改数据源绑定。'
       "
     />
 
@@ -39,16 +44,26 @@
       <el-table-column label="数据源" min-width="180">
         <template #default="scope">
           <strong>{{ datasourceName(scope.row) }}</strong>
-          <div v-if="scope.row.datasourceType" class="subtle">{{ scope.row.datasourceType }}</div>
+          <div v-if="scope.row.datasourceType" class="subtle">
+            {{ datasourceTypeLabel(scope.row.datasourceType) }}
+          </div>
         </template>
       </el-table-column>
       <el-table-column label="业务域" min-width="160">
         <template #default="scope">
-          {{ scope.row.domainName }}
-          <div class="subtle">{{ scope.row.domainCode }}</div>
+          {{ businessDomainNameLabel(scope.row.domainName, scope.row.domainCode) }}
+          <div class="subtle">
+            {{ businessDomainCodeLabel(scope.row.domainCode, scope.row.domainName) }}
+          </div>
         </template>
       </el-table-column>
-      <el-table-column prop="responsibility" label="职责" min-width="260" show-overflow-tooltip />
+      <el-table-column label="职责" min-width="260" show-overflow-tooltip>
+        <template #default="scope">
+          {{
+            responsibilityLabel(scope.row.responsibility, scope.row.domainName, scope.row.domainCode)
+          }}
+        </template>
+      </el-table-column>
       <el-table-column prop="priority" label="优先级" width="90" />
       <el-table-column label="暴露表" min-width="260">
         <template #default="scope">
@@ -86,20 +101,20 @@
             placeholder="选择已配置的数据源"
             @change="loadDatasourceTables"
           >
-            <el-option
+      <el-option
               v-for="datasource in availableDatasources"
               :key="datasource.id"
-              :label="`${datasource.name || '未命名数据源'} · ${datasource.type || '-'}`"
+              :label="`${datasourceDisplayName(datasource)} · ${datasourceTypeLabel(datasource.type)}`"
               :value="datasource.id"
             />
           </el-select>
         </el-form-item>
         <div class="form-grid">
           <el-form-item label="业务域编码" required>
-            <el-input v-model="form.domainCode" placeholder="orders" />
+            <el-input v-model="form.domainCode" placeholder="输入业务域编码" />
           </el-form-item>
           <el-form-item label="业务域名称" required>
-            <el-input v-model="form.domainName" placeholder="订单域" />
+            <el-input v-model="form.domainName" placeholder="输入业务域名称" />
           </el-form-item>
         </div>
         <el-form-item label="数据源职责" required>
@@ -107,7 +122,7 @@
             v-model="form.responsibility"
             type="textarea"
             :rows="3"
-            placeholder="例如：提供订单事实、支付状态和退款结果"
+            placeholder="说明该数据源在项目中的业务职责和可用范围"
           />
         </el-form-item>
         <el-form-item label="候选来源优先级">
@@ -142,6 +157,14 @@
     type ProjectDatasourceBinding,
     type SemanticProjectVersion,
   } from '@/services/semevosql';
+  import {
+    businessDomainCodeLabel,
+    businessDomainNameLabel,
+    datasourceDisplayName,
+    datasourceTypeLabel,
+    responsibilityLabel,
+    versionStatusLabel,
+  } from '@/services/displayLabels';
 
   const props = defineProps<{
     projectId: number;
@@ -180,10 +203,12 @@
     return fallback;
   };
 
-  const datasourceName = (binding: ProjectDatasourceBinding) =>
-    binding.datasourceName ||
-    datasources.value.find(item => item.id === binding.datasourceId)?.name ||
-    '未命名数据源';
+  const datasourceName = (binding: ProjectDatasourceBinding) => {
+    const datasource = datasources.value.find(item => item.id === binding.datasourceId);
+    return datasource
+      ? datasourceDisplayName(datasource)
+      : datasourceDisplayName({ id: binding.datasourceId, name: binding.datasourceName });
+  };
 
   const selectDefaultVersion = () => {
     if (selectedVersionId.value && props.versions.some(item => item.id === selectedVersionId.value))

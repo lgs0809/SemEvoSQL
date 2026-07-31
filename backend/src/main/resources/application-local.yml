@@ -17,9 +17,7 @@ semevosql:
     require-time-filter: false
     reject-full-table-scan: false
   operator:
-    development-mode: true
     default-operator: ${SEMEVOSQL_OPERATOR_DEFAULT_OPERATOR:local-operator}
-    default-role: ${SEMEVOSQL_OPERATOR_DEFAULT_ROLE:ADMIN}
 
 logging:
   level:

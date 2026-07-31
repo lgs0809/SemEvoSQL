@@ -22,7 +22,7 @@ const routes = [
     path: '/chat',
     name: 'ProjectChat',
     component: () => import('@/views/ProjectChat.vue'),
-    meta: { title: '问数', module: 'chat' },
+    meta: { title: '查询工作台', module: 'chat' },
   },
   {
     path: '/projects',
@@ -34,7 +34,7 @@ const routes = [
     path: '/projects/create',
     name: 'ProjectCreate',
     component: () => import('@/views/ProjectCreate.vue'),
-    meta: { title: '创建项目', module: 'project', minimumRole: 'EDITOR' },
+    meta: { title: '创建项目', module: 'project' },
   },
   {
     path: '/projects/:id',
@@ -46,7 +46,7 @@ const routes = [
     path: '/connections',
     name: 'DataConnections',
     component: () => import('@/views/DataConnections.vue'),
-    meta: { title: '数据连接', module: 'connections', minimumRole: 'EDITOR' },
+    meta: { title: '数据连接', module: 'connections' },
   },
   {
     path: '/admin',
@@ -56,13 +56,13 @@ const routes = [
     path: '/admin/models',
     name: 'AdminModels',
     component: () => import('@/views/ModelConfig.vue'),
-    meta: { title: '模型', module: 'admin', minimumRole: 'ADMIN' },
+    meta: { title: '模型', module: 'admin' },
   },
   {
     path: '/admin/settings',
     name: 'AdminSettings',
     component: () => import('@/views/SystemSettings.vue'),
-    meta: { title: '系统服务', module: 'admin', minimumRole: 'ADMIN' },
+    meta: { title: '系统服务', module: 'admin' },
   },
   {
     path: '/model-config',

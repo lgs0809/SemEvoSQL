@@ -50,6 +50,43 @@ class MultiSourceMergeEngineTest {
 		assertEquals(0, merged.getData().size());
 	}
 
+	@Test
+	void scalarCompositionCombinesIndependentAggregatesAndCalculatesAbsoluteDifference() {
+		MergePolicy scalar = MergePolicy.builder()
+			.policyCode("runtime_scalar_composition")
+			.mergeType(MergeType.SCALAR_COMPOSITION)
+			.maxRows(1)
+			.calculationExpression("difference=ABS(left_metric-right_metric)")
+			.build();
+
+		ResultSetBO merged = engine.merge(scalar, List.of(result(List.of("left_metric"), row("left_metric", "3")),
+				result(List.of("right_metric"), row("right_metric", "5"))));
+
+		assertEquals(List.of("left_metric", "right_metric", "difference"), merged.getColumn());
+		assertEquals(1, merged.getData().size());
+		assertEquals("3", merged.getData().get(0).get("left_metric"));
+		assertEquals("5", merged.getData().get(0).get("right_metric"));
+		assertEquals("2", merged.getData().get(0).get("difference"));
+	}
+
+	@Test
+	void scalarCompositionFailsClosedWhenOneSourceIsNotScalar() {
+		MergePolicy scalar = MergePolicy.builder()
+			.policyCode("runtime_scalar_composition")
+			.mergeType(MergeType.SCALAR_COMPOSITION)
+			.maxRows(1)
+			.build();
+		ResultSetBO nonScalar = ResultSetBO.builder()
+			.column(List.of("metric"))
+			.data(List.of(row("metric", "1"), row("metric", "2")))
+			.build();
+
+		IllegalStateException error = assertThrows(IllegalStateException.class,
+				() -> engine.merge(scalar, List.of(result(List.of("left_metric"), row("left_metric", "3")), nonScalar)));
+
+		assertTrue(error.getMessage().contains("requires exactly one row"));
+	}
+
 	private MergePolicy policy() {
 		return MergePolicy.builder()
 			.policyCode("governed_lookup")

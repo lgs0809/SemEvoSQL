@@ -19,9 +19,7 @@ import cn.lgs.semevosql.connector.accessor.AbstractAccessor;
 import cn.lgs.semevosql.connector.ddl.DdlFactory;
 import cn.lgs.semevosql.connector.pool.DBConnectionPoolFactory;
 import cn.lgs.semevosql.enums.BizDataSourceTypeEnum;
-import org.springframework.stereotype.Service;
 
-@Service("damengAccessor")
 public class DamengDBAccessor extends AbstractAccessor {
 
 	private static final String ACCESSOR_TYPE = "Dameng_Accessor";
