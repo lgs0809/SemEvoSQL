@@ -65,10 +65,10 @@ jobs:
           --env-file deploy/semevosql/.env
           -f deploy/semevosql/docker-compose.yml
           --profile app config --quiet
-      - name: Reject unauthenticated remote exposure
+      - name: Reject non-loopback exposure by default
         run: |
-          if SEMEVOSQL_BIND_HOST=0.0.0.0 SEMEVOSQL_SECURITY_ENABLED=false SEMEVOSQL_SINGLE_USER_MODE=true ./scripts/start-semevosql.sh; then
-            echo "Unauthenticated remote exposure was unexpectedly accepted" >&2
+          if SEMEVOSQL_BIND_HOST=0.0.0.0 ./scripts/start-semevosql.sh; then
+            echo "Non-loopback exposure was unexpectedly accepted" >&2
             exit 1
           fi
       - name: Build and start portable deployment
