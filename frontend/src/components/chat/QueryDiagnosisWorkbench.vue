@@ -124,7 +124,7 @@
               <span class="section-index">03</span>
               <h3>召回与最终绑定</h3>
             </div>
-            <small v-if="!diagnosis.retrievalCandidates.length">当前角色只展示最终绑定摘要</small>
+            <small v-if="!diagnosis.retrievalCandidates.length">未找到召回候选，仅展示最终绑定摘要</small>
           </div>
 
           <div v-if="selectedAssetRows.length" class="selected-assets">
@@ -177,7 +177,7 @@
                 type="info"
                 :closable="false"
                 show-icon
-                title="当前角色可查看诊断，但语义纠错需要项目 Editor 权限。"
+                title="当前语义纠正暂不可用，系统正在保护已发布语义与当前运行状态。"
               />
               <el-form label-position="top" class="repair-form">
                 <el-form-item label="错误的是哪类业务含义">
