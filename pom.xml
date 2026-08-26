@@ -33,7 +33,7 @@
     <mybatis.version>3.0.4</mybatis.version>
 
     <!-- CheckStyle Maven Plugin -->
-    <maven-checkstyle-plugin.version>3.5.0</maven-checkstyle-plugin.version>
+    <maven-checkstyle-plugin.version>3.6.0</maven-checkstyle-plugin.version>
     <puppycrawl-tools-checkstyle.version>9.3</puppycrawl-tools-checkstyle.version>
 
     <!-- Maven Compiler Plugin -->
