@@ -40,7 +40,7 @@
     <maven-compiler-plugin.version>3.11.0</maven-compiler-plugin.version>
     <!--        spotless version-->
     <spotless-maven-plugin.version>3.1.0</spotless-maven-plugin.version>
-    <docker-java.version>3.5.3</docker-java.version>
+    <docker-java.version>3.7.1</docker-java.version>
     <druid.version>1.2.22</druid.version>
     <h2.version>2.3.232</h2.version>
     <dameng.version>8.1.3.140</dameng.version>
