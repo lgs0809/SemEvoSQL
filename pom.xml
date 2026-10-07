@@ -37,7 +37,7 @@
     <puppycrawl-tools-checkstyle.version>9.3</puppycrawl-tools-checkstyle.version>
 
     <!-- Maven Compiler Plugin -->
-    <maven-compiler-plugin.version>3.11.0</maven-compiler-plugin.version>
+    <maven-compiler-plugin.version>3.16.0</maven-compiler-plugin.version>
     <!--        spotless version-->
     <spotless-maven-plugin.version>3.1.0</spotless-maven-plugin.version>
     <docker-java.version>3.5.3</docker-java.version>
