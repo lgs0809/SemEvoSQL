@@ -27,7 +27,7 @@
     "axios": "^1.20.0",
     "bootstrap-icons": "^1.11.3",
     "element-plus": "^2.9.11",
-    "vue": "^3.4.0",
+    "vue": "^3.5.43",
     "vue-router": "^4.2.0"
   },
   "devDependencies": {
