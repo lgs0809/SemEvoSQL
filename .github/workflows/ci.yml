@@ -33,7 +33,7 @@ jobs:
         run: bash scripts/verify-db-upgrade-matrix.sh
       - name: Preserve failed backend test reports
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: backend-test-reports-${{ github.run_attempt }}
           path: |
@@ -69,7 +69,7 @@ jobs:
           npm audit --audit-level=high 2>&1 | tee ci-results/npm-audit.log
       - name: Preserve failed frontend checks
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: frontend-check-logs-${{ github.run_attempt }}
           path: frontend/ci-results/
@@ -172,7 +172,7 @@ jobs:
           --profile app logs --no-color --tail=200
       - name: Preserve failed deployment checks
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: deployment-check-logs-${{ github.run_attempt }}
           path: ci-results/
